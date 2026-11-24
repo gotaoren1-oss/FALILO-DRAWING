@@ -1367,6 +1367,8 @@ async function readPlanData(){
         const s=decodeSHX(txt);data.texts.push({s,raw:txt,x:(p1[0]+p2[0])/2,y:(p1[1]+p2[1])/2,w:Math.max(ww,hh),h:Math.max(2,Math.min(ww,hh)),a:hh>ww*1.6?Math.PI/2:0,src:'ann'})}
     }catch(e){}
   }
+  /* marks drawn in FALILO's viewer (marker / pen) travel with the plan */
+  for(const m of (S.drawing&&S.drawing.plan&&S.drawing.plan.marks)||[])data.marks.push({...m,pts:m.pts.map(q=>q.slice())});
   try{const tc=await PL.page.getTextContent();const T=vp.transform;
     for(const it of tc.items){const s=String(it.str||'').trim();if(!s)continue;const m=it.transform;
       const fs=Math.hypot(m[2],m[3])||Math.hypot(m[0],m[1]);const ang=Math.atan2(m[1],m[0]);
@@ -2030,7 +2032,7 @@ function hlRead(res,data,kM,opts={}){const LG=opts.legend||null;
   // 3) types from what's written + the field rules
   const words=placeWords(data.texts.map(t=>({...t,s:t.src==='ann'?decodeSHX(t.s):t.s})),kM);
   const allNear=pipes.map(o=>nearWords(words,o.pts[Math.floor(o.pts.length/2)],5)).join(' ');
-  for(const o of pipes){const L=lab.get(o);if(!L)continue;const fb=pipeT(o.typeId);const near=allNear;
+  for(const o of pipes){const L=lab.get(o);if(!L||!L.dia||L.dia==='undefined')continue;const fb=pipeT(o.typeId);const near=allNear;
     const ctx={wet:WET_RE.test(near),sewer:/ביוב|שופכין/.test(near),drain:/ניקוז|נגר/.test(near),water:/מים/.test(near)};
     if(LG&&LG.dia[L.dia]&&pipeT(LG.dia[L.dia])){o.typeId=LG.dia[L.dia];o.slope=L.slope||null;o.src=[L.dia,L.slope?'-'+L.slope:''].join('');o.ok=!L.guess;if(L.unsure)o.doubt='הקוטר לא כתוב ליד הקו – הונח '+L.dia;out.typed++;continue}
     let mat=L.mat||(opts.noteMat)||((ctx.wet||ctx.sewer||ctx.drain)?ruleMaterial(L.dia,null,ctx):null)||(fb&&matFits(fb.mat,L.dia)&&!/"/.test(L.dia)&&L.dia!==fb.dia?null:null)||'';
@@ -2115,6 +2117,9 @@ function legendItem(def){const L=lib();if(def.kind==='riser'){let it=L.items.fin
   let it=L.items.find(i=>i.name===def.name);if(!it){it={id:uid(),sym:def.sym||(/מחסום/.test(def.name)?'trap':'point'),name:def.name,unit:'u',section:''};L.items.push(it)}return it}
 
 /* ---------- draw everything: which line styles in the plan are pipes? ---------- */
+function colInfo(c){c=String(c||'');let r,g,b;const m=c.match(/rgba?\((\d+)\D+(\d+)\D+(\d+)/);if(m)[r,g,b]=[+m[1],+m[2],+m[3]];else if(/^#?[0-9a-f]{3,6}$/i.test(c))[r,g,b]=hex2rgb(c);else return {lum:0,sat:0};const mx=Math.max(r,g,b),mn=Math.min(r,g,b);return {lum:(r*299+g*587+b*114)/1000,sat:mx?(mx-mn)/mx:0}}
+function styleScore(e,kM){const hits=e.hits||0;const lenM=e.len*kM||1;const per100=hits/(lenM/100);const ci=colInfo(e.color);const black=ci.lum<50&&ci.sat<.25,gray=ci.sat<.15&&ci.lum>=50;
+  return Math.log2(1+hits)*30+Math.min(per100,8)*6+Math.min(e.w,4)*22+(ci.sat>.3?35:0)-(black?40:0)-(gray?70:0)}
 async function pipeStyles(prog=()=>{}){const vec=await readVectors(p=>prog(p*.7,'קורא את קווי התוכנית'));if(!vec)return [];const W=PL.vecW,C=PL.vecC,pal=PL.vecPal;const data=await readPlanData();const kM=planK(S.drawing.plan);
   const st=new Map();for(let i=0,j=0;i<vec.length;i+=4,j++){const col=String(pal[C[j]]||'');if(col.startsWith('fill:'))continue;const L=Math.hypot(vec[i+2]-vec[i],vec[i+3]-vec[i+1]);if(L<9)continue;/* short strokes are lettering, hatching and symbols – not pipes */const k=C[j]+'|'+W[j].toFixed(2);let e=st.get(k);if(!e)st.set(k,e={key:k,color:col,w:W[j],len:0,n:0,idx:[]});e.len+=L;e.n++;if(e.idx.length<6000)e.idx.push(i)}
   // labels written next to the lines ("6"-1%", Ø110 …)
@@ -2122,7 +2127,7 @@ async function pipeStyles(prog=()=>{}){const vec=await readVectors(p=>prog(p*.7,
   for(const e of st.values())for(const i of e.idx){const mx=(vec[i]+vec[i+2])/2,my=(vec[i+1]+vec[i+3])/2;G.addBox(mx-1,my-1,mx+1,my+1,e)}
   for(const t of labs){let best=null,bd=10;for(const e of G.query(t.x-10,t.y-10,t.x+10,t.y+10)){for(const i of e.idx){const dd=distSeg([t.x,t.y],[vec[i],vec[i+1]],[vec[i+2],vec[i+3]]);if(dd<bd){bd=dd;best=e}}}if(best){best.hits=(best.hits||0)+1;(best.dias||(best.dias=new Set())).add(t.sd.dia)}}
   const tot=[...st.values()].reduce((a,e)=>a+e.len,0);prog(1,'');
-  const list=[...st.values()].filter(e=>e.len>tot*.002&&e.n>=3).map(e=>({...e,lenM:e.len*kM,dias:[...(e.dias||[])],hits:e.hits||0,score:e.w*100+Math.log2(1+(e.hits||0))*8+(/^#?(808080|a0a0a0|b3b3b3|c0c0c0|dcdcdc|dddddd|d3d3d3)$/i.test(e.color)?-60:0)}));/* plumbing is plotted heavy; labels only nudge */
+  const list=[...st.values()].filter(e=>e.len>tot*.002&&e.n>=3).map(e=>({...e,lenM:e.len*kM,dias:[...(e.dias||[])],hits:e.hits||0,score:styleScore(e,kM)}));/* diameters written next to the lines decide; colour and weight help; black/grey is usually the building */
   list.sort((a,b)=>b.score-a.score);return {list:list.slice(0,10),vec}}
 function styleThumb(e,vec,w=150,h=90){if(!e.idx.length)return '';const xs=e.idx.map(i=>(vec[i]+vec[i+2])/2).sort((a,b)=>a-b),ys=e.idx.map(i=>(vec[i+1]+vec[i+3])/2).sort((a,b)=>a-b);const q=(a,f)=>a[Math.floor((a.length-1)*f)];let x0=q(xs,.04),x1=q(xs,.96),y0=q(ys,.04),y1=q(ys,.96);const px=(x1-x0)*.08+5,py=(y1-y0)*.08+5;x0-=px;x1+=px;y0-=py;y1+=py;
   const k=Math.min((w-8)/((x1-x0)||1),(h-8)/((y1-y0)||1));let d='';for(const i of e.idx.filter(i=>Math.max(vec[i],vec[i+2])>=x0&&Math.min(vec[i],vec[i+2])<=x1&&Math.max(vec[i+1],vec[i+3])>=y0&&Math.min(vec[i+1],vec[i+3])<=y1).slice(0,2500))d+=`M${((vec[i]-x0)*k+4).toFixed(1)} ${((vec[i+1]-y0)*k+4).toFixed(1)}L${((vec[i+2]-x0)*k+4).toFixed(1)} ${((vec[i+3]-y0)*k+4).toFixed(1)}`;
@@ -2721,7 +2726,9 @@ async function drawAllModal(region){const d=S.drawing;if(!d.plan||d.plan.kind!==
   if(!d.plan.N){const ok=await scaleModal(true);if(!ok)return}
   const pg=progress('מחפש את קווי הצנרת בתוכנית',['']);let res;try{res=await pipeStyles((f,t)=>pg.set(f,t))}catch(err){pg.close();toast(err.message);return}pg.close();
   const {list,vec}=res;if(!list.length){toast('לא נמצאו קווים בתוכנית');return}
-  const pre=new Set([list[0].key]);
+  // preselect: the best style, every other coloured style with diameters written next to it, and what you chose last time for this client
+  const mem=new Set((S.project.pipeStyleMem||[]));const memHit=list.filter(s=>mem.has(s.color+'|'+(+s.w).toFixed(1)));
+  const top=list[0];const pre=new Set(memHit.length?memHit.map(s=>s.key):[top.key,...list.slice(1).filter(s=>s.hits>=Math.max(3,top.hits*.35)&&colInfo(s.color).sat>.15).map(s=>s.key)]);
   const row=s=>`<label class="crow" style="cursor:pointer;align-items:center"><input type="checkbox" data-st="${esc(s.key)}" ${pre.has(s.key)?'checked':''} style="width:22px;height:22px;flex:none">${styleThumb(s,vec)}<div class="grow"><div style="font-weight:600;font-size:15px;display:flex;align-items:center;gap:8px"><span style="display:inline-block;width:34px;height:${Math.max(2,Math.min(6,s.w))}px;background:${/^#|^rgb/.test(s.color)?s.color:'#334155'};border-radius:2px"></span>${fmtM(s.lenM,0)} מ' קווים</div>
     <div style="font-size:13px;color:var(--muted2)">${s.dias.length?`ליד הקווים כתוב: <b dir="ltr">${s.dias.slice(0,5).map(esc).join(', ')}</b>`:'לא נמצא כיתוב קוטר לידם'}</div></div></label>`;
   const m=modal(`<div class="mh"><div><h2>אילו קווים הם צנרת?</h2><p>סימנתי את הסוג שנראה הכי כמו צנרת (הקו העבה). מסתכלים בתמונות הקטנות ומסמנים את כל סוגי הקווים שהם צנרת – השאר לא ייכנסו.</p></div></div>
@@ -2732,7 +2739,7 @@ async function drawAllModal(region){const d=S.drawing;if(!d.plan||d.plan.kind!==
   m.onclick=async ev=>{if(ev.target.closest('[data-x]')){closeModal(m);return}
     if(ev.target.closest('[data-reg]')){closeModal(m);S.regionFor='all';setTool('region');hint('מסמנים מלבן סביב האזור לשרטוט');return}
     if(ev.target.closest('[data-noreg]')){closeModal(m);drawAllModal(null);return}
-    if(ev.target.closest('[data-ok]')){const styles=$$('[data-st]',m).filter(c=>c.checked).map(c=>c.dataset.st);if(!styles.length){toast('בוחרים לפחות סוג קו אחד');return}closeModal(m);
+    if(ev.target.closest('[data-ok]')){const styles=$$('[data-st]',m).filter(c=>c.checked).map(c=>c.dataset.st);if(!styles.length){toast('בוחרים לפחות סוג קו אחד');return}closeModal(m);S.project.pipeStyleMem=list.filter(s=>styles.includes(s.key)).map(s=>s.color+'|'+(+s.w).toFixed(1));
       const pg2=progress('משרטט את כל הצנרת',['קורא את הקווים','מחבר ומיישר','קורא קטרים ואביזרים','אוסף מבנה קרוב','מסיים']);
       try{pushUndo();const r=await autoDrawFromMarks({},{region,drawAll:{styles}},(f,s)=>pg2.set(f,s));
         d.autoDone=true;if(d.ctx&&d.ctx.style==='clean'){d.layers=d.layers||{};d.layers.plan={...(d.layers.plan||{}),hidden:true}}pg2.close();S.sel.clear();ctxSig=pipeSig();changed();renderStage();setTimeout(()=>{renderFloat();fitPage()},60);summaryModal(r)}
@@ -3303,6 +3310,12 @@ function dxfNorm(e,cp){const c=e.c,n=k=>+(c[k]||0),deg=k=>n(k)*Math.PI/180;const
     case 'INSERT':return {...base,name:(c[2]||'').trim(),p:[n(10),n(20)],sx:c[41]!=null?n(41):1,sy:c[42]!=null?n(42):1,rot:deg(50)};
     case 'DIMENSION':return {...base,type:'INSERT',name:(c[2]||'').trim(),p:[0,0],sx:1,sy:1,rot:0};
     case 'SOLID':case '3DFACE':return {...base,type:'PL',v:[[n(10),n(20)],[n(11),n(21)],[n(13),n(23)],[n(12),n(22)]],closed:true};
+    case 'HATCH':{const L=e.list;const loops=[];let i=L.findIndex(q=>q[0]===91);if(i<0)return null;const nP=+L[i][1];i++;
+      for(let pth=0;pth<nP&&i<L.length;pth++){while(i<L.length&&L[i][0]!==92)i++;if(i>=L.length)break;const flag=+L[i][1];i++;const pts=[];
+        if(flag&2){while(i<L.length&&L[i][0]!==93)i++;const nv=+L[i][1];i++;for(let k=0;k<nv&&i<L.length;){if(L[i][0]===10){pts.push([+L[i][1],+L[i+1][1]]);i+=2;k++}else i++}}
+        else{while(i<L.length&&L[i][0]!==93)i++;const ne=+L[i][1];i++;for(let k=0;k<ne&&i<L.length;k++){while(i<L.length&&L[i][0]!==72)i++;const t=+L[i][1];i++;const g={};while(i<L.length&&![72,97,92].includes(L[i][0])){if(!(L[i][0] in g))g[L[i][0]]=+L[i][1];i++}
+            if(t===1){if(!pts.length)pts.push([g[10],g[20]]);pts.push([g[11],g[21]])}else if(t===2){let a0=g[50]*Math.PI/180,a1=g[51]*Math.PI/180;const ccw=g[73]!==0;if(!ccw){[a0,a1]=[-a1,-a0]}if(a1<a0)a1+=Math.PI*2;const nn=Math.max(4,Math.ceil((a1-a0)/(Math.PI/18)));for(let q=0;q<=nn;q++){const a=a0+(a1-a0)*q/nn;let y=g[20]+g[40]*Math.sin(a);if(!ccw)y=2*g[20]-y;pts.push([g[10]+g[40]*Math.cos(a),y])}}}}
+        if(pts.length>2)loops.push(pts)}return loops.length?{...base,type:'HATCH',loops,solid:n(70)===1}:null}
   }return null}
 /* libredwg entity → normalized */
 function dwgNorm(e){const p=o=>o?[o.x||0,o.y||0]:[0,0];const base={type:e.type,layer:e.layer||'0',ci:e.colorIndex!=null?e.colorIndex:256};
@@ -3315,13 +3328,18 @@ function dwgNorm(e){const p=o=>o?[o.x||0,o.y||0]:[0,0];const base={type:e.type,l
     case 'SPLINE':return {...base,type:'SPL',pts:(e.fitPoints&&e.fitPoints.length?e.fitPoints:e.controlPoints||[]).map(p)};
     case 'TEXT':case 'ATTRIB':case 'ATTDEF':if(e.type==='ATTDEF')return null;return {...base,type:'TEXT',p:p(e.startPoint||e.insertionPoint),p2:e.endPoint?p(e.endPoint):null,h:e.textHeight||e.height||1,rot:e.rotation||0,s:cadText(e.text),ha:e.halign||e.horizontalAlignment||0,va:e.valign||e.verticalAlignment||0};
     case 'MTEXT':{const dir=e.direction&&(e.direction.x||e.direction.y)?Math.atan2(e.direction.y,e.direction.x):e.rotation||0;return {...base,type:'MTEXT',p:p(e.insertionPoint),h:e.textHeight||e.height||1,rot:dir,s:cadText(mtextPlain(e.text||'')),at:e.attachmentPoint||1}}
-    case 'INSERT':return {...base,name:e.name,p:p(e.insertionPoint),sx:e.xScale||1,sy:e.yScale||1,rot:e.rotation||0,attribs:e.attribs};
+    case 'INSERT':{const at=(e.attribs||[]).map(a=>{const t=a.text&&typeof a.text==='object'?a.text:a;const str=typeof t.text==='string'?t.text:typeof a.text==='string'?a.text:'';if(!str||((a.flags||0)&1)||a.isVisible===false)return null;const e2=t.endPoint&&(t.endPoint.x||t.endPoint.y)?p(t.endPoint):null;
+        return {type:'TEXT',layer:a.layer||e.layer||'0',ci:a.colorIndex!=null?a.colorIndex:256,p:p(t.startPoint||t.insertionPoint),p2:e2,h:t.textHeight||1,rot:t.rotation||0,s:cadText(str),ha:t.halign||0,va:t.valign||0}}).filter(Boolean);
+      return {...base,name:e.name,p:p(e.insertionPoint),sx:e.xScale||1,sy:e.yScale||1,rot:e.rotation||0,attribs:at}}
+    case 'HATCH':{const loops=[];for(const bp of e.boundaryPaths||[]){const pts=[];if(bp.vertices&&bp.vertices.length){for(const v of bp.vertices)pts.push([v.x,v.y])}
+        else for(const ed of bp.edges||[]){if(ed.type===1){if(!pts.length)pts.push(p(ed.start));pts.push(p(ed.end))}else if(ed.type===2&&ed.center){let a0=ed.startAngle||0,a1=ed.endAngle||0;if(ed.isCCW===false||ed.isCCW===0){const t=-a0;a0=-a1;a1=t}if(a1<a0)a1+=Math.PI*2;const n=Math.max(4,Math.ceil((a1-a0)/(Math.PI/18)));const arc=[];for(let k=0;k<=n;k++){const a=a0+(a1-a0)*k/n;arc.push([ed.center.x+ed.radius*Math.cos(a),ed.center.y+ed.radius*Math.sin(a)])}if(ed.isCCW===false||ed.isCCW===0)arc.forEach(q=>q[1]=2*ed.center.y-q[1]);pts.push(...arc)}else if(ed.start&&ed.end){if(!pts.length)pts.push(p(ed.start));pts.push(p(ed.end))}}
+        if(pts.length>2)loops.push(pts)}return loops.length?{...base,type:'HATCH',loops,solid:!!e.solidFill}:null}
     case 'DIMENSION':return e.name?{...base,type:'INSERT',name:e.name,p:[0,0],sx:1,sy:1,rot:0}:null;
     case 'SOLID':return e.corner1?{...base,type:'PL',v:[p(e.corner1),p(e.corner2),p(e.corner4||e.corner3),p(e.corner3)],closed:true}:null}
   return null}
 
 /* normalized entities → drawable geometry (segments per layer|color, texts) in units with y pointing down */
-function cadBuild(model){const {ents,blocks,layers}=model;const groups=new Map();const texts=[];let nseg=0;const xs=[],ys=[];
+function cadBuild(model){const {ents,blocks,layers}=model;const groups=new Map();const fills=new Map();const texts=[];let nseg=0;const xs=[],ys=[];
   const layerOff=n=>{const L=layers[n];return L&&(L.off||L.frozen)};
   const colOf=(e,pc,lay)=>{let ci=e.ci;if(ci===256){const L=layers[e.layer==='0'&&lay?lay:e.layer];ci=L?Math.abs(L.ci==null?7:L.ci):7}if(ci===0)return pc||'#000000';return cadInk(aci(ci))};
   const add=(lay,col,x1,y1,x2,y2)=>{const key=lay+'|'+col;let g=groups.get(key);if(!g){g={lay,col,a:[]};groups.set(key,g)}g.a.push(x1,-y1,x2,-y2);nseg++;xs.push(x1,x2);ys.push(-y1,-y2)};
@@ -3338,6 +3356,7 @@ function cadBuild(model){const {ents,blocks,layers}=model;const groups=new Map()
       case 'ARC':poly(arcPts(e.c[0],e.c[1],e.r,e.a0,e.a1));break;
       case 'ELLIPSE':{const R=Math.hypot(e.m[0],e.m[1]),ang=Math.atan2(e.m[1],e.m[0]);let a0=e.a0,a1=e.a1;if(a1<=a0)a1+=Math.PI*2;const n=48;const o=[];for(let k=0;k<=n;k++){const t=a0+(a1-a0)*k/n;const x=R*Math.cos(t),y=R*e.ratio*Math.sin(t);o.push([e.c[0]+x*Math.cos(ang)-y*Math.sin(ang),e.c[1]+x*Math.sin(ang)+y*Math.cos(ang)])}poly(o);break}
       case 'SPL':poly(e.pts);break;
+      case 'HATCH':{const key=lay+'|'+col+'|'+(e.solid?1:0);let f=fills.get(key);if(!f){f={lay,col,solid:e.solid,loops:[]};fills.set(key,f)}for(const lp of e.loops)f.loops.push(lp.map(q=>{const t=T(q[0],q[1]);return [t[0],-t[1]]}));break}
       case 'TEXT':case 'MTEXT':{if(e.hidden||!e.s||!e.s.trim())break;let q=e.p;let al='left',bl='alphabetic';
         if(e.type==='TEXT'){if((e.ha||e.va)&&e.p2)q=e.p2;al=e.ha===1||e.ha===4?'center':e.ha===2?'right':'left';bl=e.va===3?'top':e.va===2||e.ha===4?'middle':'alphabetic'}
         else{const at=e.at;al=[0,1,4,7].includes(at)?'left':[2,5,8].includes(at)?'center':'right';bl=at<=3?'top':at<=6?'middle':'bottom'}
@@ -3345,7 +3364,7 @@ function cadBuild(model){const {ents,blocks,layers}=model;const groups=new Map()
         texts.push({x:p0[0],y:-p0[1],h:e.h*sc,rot:-Math.atan2(uy,ux),s:e.s,al,bl,col,lay});break}
       case 'INSERT':{const b=blocks[e.name];if(!b||depth>8)break;const cs=Math.cos(e.rot),sn=Math.sin(e.rot);const Tm=[cs*e.sx,sn*e.sx,-sn*e.sy,cs*e.sy,e.p[0],e.p[1]];const B=[1,0,0,1,-b.base[0],-b.base[1]];
         const mul=(A,C)=>[A[0]*C[0]+A[2]*C[1],A[1]*C[0]+A[3]*C[1],A[0]*C[2]+A[2]*C[3],A[1]*C[2]+A[3]*C[3],A[0]*C[4]+A[2]*C[5]+A[4],A[1]*C[4]+A[3]*C[5]+A[5]];const NM=mul(M,mul(Tm,B));
-        for(const be of b.ents)emit(be,NM,col,depth+1,lay);break}}};
+        for(const be of b.ents)emit(be,NM,col,depth+1,lay);for(const a of e.attribs||[])emit(a,M,col,depth+1,lay);break}}};
   for(const e of ents)emit(e,[1,0,0,1,0,0],null,0,null);
   for(const t of texts){xs.push(t.x);ys.push(t.y)}
   if(!xs.length)throw new Error('לא נמצא שרטוט בקובץ');
@@ -3355,8 +3374,9 @@ function cadBuild(model){const {ents,blocks,layers}=model;const groups=new Map()
   const gl=[];let allSeg=new Float32Array(nseg*4),o=0;const lays=new Set();
   for(const g of groups.values()){const a=new Float32Array(g.a.length);for(let k=0;k<g.a.length;k+=2){a[k]=g.a[k]-x0;a[k+1]=g.a[k+1]-y0}const p=new Path2D();for(let k=0;k<a.length;k+=4){p.moveTo(a[k],a[k+1]);p.lineTo(a[k+2],a[k+3])}allSeg.set(a,o);o+=a.length;gl.push({lay:g.lay,col:g.col,path:p,a});lays.add(g.lay)}
   for(const t of texts){t.x-=x0;t.y-=y0;lays.add(t.lay)}
-  return {groups:gl,texts,segs:allSeg,w:x1-x0,h:y1-y0,layers:[...lays].sort(),units:model.units||0,origin:[x0,y0]}}
-function cadPaint(ctx,k){const C=VW.cad;ctx.lineCap='round';ctx.lineWidth=Math.max(.6,VW.dpr*.55)/(k*VW.dpr);
+  const fl=[];for(const f of fills.values()){const p=new Path2D();const loops=f.loops.map(lp=>lp.map(q=>[q[0]-x0,q[1]-y0]));for(const lp of loops){p.moveTo(lp[0][0],lp[0][1]);for(let k=1;k<lp.length;k++)p.lineTo(lp[k][0],lp[k][1]);p.closePath()}fl.push({lay:f.lay,col:f.col,solid:f.solid,path:p,loops});lays.add(f.lay)}
+  return {groups:gl,fills:fl,texts,segs:allSeg,w:x1-x0,h:y1-y0,layers:[...lays].sort(),units:model.units||0,origin:[x0,y0]}}
+function cadPaint(ctx,k){const C=VW.cad;for(const f of C.fills||[]){if(VW.hid.has(f.lay))continue;ctx.globalAlpha=f.solid?.55:.16;ctx.fillStyle=f.col;ctx.fill(f.path,'evenodd')}ctx.globalAlpha=1;ctx.lineCap='round';ctx.lineWidth=Math.max(.6,VW.dpr*.55)/(k*VW.dpr);
   for(const g of C.groups){if(VW.hid.has(g.lay))continue;ctx.strokeStyle=g.col;ctx.stroke(g.path)}
   const st=vEl('#vstage');const W=st.clientWidth,H=st.clientHeight;const [vx0,vy0]=s2v(0,0),[vx1,vy1]=s2v(W,H);
   for(const t of C.texts){if(VW.hid.has(t.lay))continue;const px=t.h*k;if(px<3.2)continue;if(t.x<vx0-t.h*40||t.x>vx1+t.h*40||t.y<vy0-t.h*20||t.y>vy1+t.h*20)continue;
@@ -3401,7 +3421,7 @@ async function vLoadOffice(file){const buf=await file.arrayBuffer();
 const VTOOLS=[['pan','hand','הזזה ובחירה','הזזה'],null,['len','ruler','מדידת אורך','אורך'],['poly','poly','אורך מצטבר (כמה קטעים)','מצטבר'],['area','area','שטח והיקף','שטח'],['angle','angle','זווית','זווית'],['count','count','ספירה','ספירה'],['ext','ext','המשכת קו לאורך קיר','המשכה'],['scale','scale','קנה מידה','קנ"מ'],null,
   ['hl','hl','מרקר','מרקר'],['pen','draw','עט','עט'],['line','line','קו ישר','קו'],['arrow','arrow','חץ','חץ'],['rect','rect','מלבן','מלבן'],['ell','ell','אליפסה','עיגול'],['cloud','cloud','ענן','ענן'],['text','text','הערה','הערה']];
 const VMEAS=new Set(['len','poly','area','angle','count']);
-const VHINT={pan:'גוררים להזזה · צביטה לזום · נגיעה בסימון בוחרת אותו',len:'גוררים מנקודה לנקודה – נצמד לקווים ולפינות',poly:'נוגעים נקודה אחרי נקודה · ✓ לסיום',area:'מקיפים את השטח נקודה אחרי נקודה · נגיעה בנקודה הראשונה סוגרת',angle:'שלוש נקודות: קצה, קודקוד, קצה',count:'נוגעים בכל פריט לספירה · ✓ לסיום',
+const VHINT={pan:'גוררים להזזה · צביטה לזום · נגיעה בסימון בוחרת אותו',len:'גוררים מנקודה לנקודה – נצמד לקווים ולפינות. עובי קיר: מתחילים על קו הקיר עם "ישר" דלוק – המדידה תצא ניצבת עד הקיר השני',poly:'נוגעים נקודה אחרי נקודה · ✓ לסיום',area:'מקיפים את השטח נקודה אחרי נקודה · נגיעה בנקודה הראשונה סוגרת',angle:'שלוש נקודות: קצה, קודקוד, קצה',count:'נוגעים בכל פריט לספירה · ✓ לסיום',
   ext:'נוגעים בקו של קיר – הוא יימשך לכל אורך הדף',scale:'מותחים קו על מידה ידועה בתוכנית, ואז כותבים את האורך האמיתי',hl:'מסמנים במרקר · עם "ישר" הקו יוצא ישר',pen:'כותבים ביד חופשית',line:'גוררים קו',arrow:'גוררים חץ',rect:'גוררים מלבן',ell:'גוררים אליפסה',cloud:'גוררים ענן סביב האזור',text:'נוגעים במקום וכותבים'};
 function vHTML(){return `<div class="vtop"><button class="btn icon" data-va="back" aria-label="חזרה">${ic('back')}</button>
     <div class="vtt"><b data-va="rename" title="שינוי שם">${esc(VW.meta.name)}</b><span class="vsave" id="vsave">נשמר במכשיר</span></div><div class="sep"></div>
@@ -3472,7 +3492,7 @@ function vSetTool(t){VW.tool=t;VW.tmp=null;if(t!=='pan')VW.sel=null;vRenderUI();
 /* ---------- annotations model ---------- */
 const vAnns=()=>(VW.ann.pages[VW.pi]=VW.ann.pages[VW.pi]||[]);
 const vFind=id=>vAnns().find(a=>a.id===id);
-const vU=()=>1/(VW.k0||VW.view.k);                                   // one "screen pixel at fit" in page units
+const vU=()=>1/VW.view.k;                                              // one screen pixel (at the zoom you draw in) in page units
 const vFs=()=>13*vU();
 function vWidth(t){const base=t==='hl'?[10,16,26][VW.wi]:t==='pen'?[1.4,2.4,4][VW.wi]:[1.4,2.2,3.6][VW.wi];return base*vU()}
 function vSnapState(){return JSON.stringify({p:VW.ann.pages[VW.pi]||[],s:VW.ann.scale[VW.pi]||null})}
@@ -3494,7 +3514,8 @@ function vAngle(p){const [a,b,c]=p;let d=Math.abs(Math.atan2(a[1]-b[1],a[0]-b[0]
 function vMeasTxt(a){switch(a.t){case 'len':case 'poly':case 'scale':return vFmtLen(vLenU(a.pts));case 'area':return vFmtArea(vAreaU(a.pts))+' · היקף '+vFmtLen(vLenU([...a.pts,a.pts[0]]));case 'angle':return vAngle(a.pts).toFixed(1)+'°';case 'count':return a.pts.length+' יח׳'}return ''}
 
 /* ---------- annotation → primitives (shared by screen and PDF export) ---------- */
-function vPrims(a,live){const P=[];const c=a.c||'#E5484D',w=a.w||vWidth(a.t),fs=a.fs||vFs();const poly=(pts,o={})=>P.push({k:'poly',pts,stroke:o.stroke===undefined?c:o.stroke,w:o.w||w,fill:o.fill||null,fop:o.fop||0,sop:o.sop==null?1:o.sop,dash:o.dash||null,closed:!!o.closed,cap:o.cap||'round'});
+/* px = page units per screen pixel (or per ~0.9pt on paper). Measurements stay thin and readable at any zoom; markups keep the size they were drawn with */
+function vPrims(a,live,px){px=px||1/VW.view.k;const MS=VMEAS.has(a.t)||a.t==='scale'||a.t==='ext';const P=[];const c=a.c||'#E5484D',w=MS?1.6*px:(a.w||vWidth(a.t)),fs=MS?12.5*px:(a.fs||vFs());const poly=(pts,o={})=>P.push({k:'poly',pts,stroke:o.stroke===undefined?c:o.stroke,w:o.w||w,fill:o.fill||null,fop:o.fop||0,sop:o.sop==null?1:o.sop,dash:o.dash||null,closed:!!o.closed,cap:o.cap||'round'});
   const text=(x,y,s,o={})=>P.push({k:'text',x,y,s,size:o.size||fs,color:o.color||c,rot:o.rot||0,al:o.al||'center',bg:o.bg!==false,bl:o.bl||'middle'});
   const circ=(x,y,r,n=28)=>Array.from({length:n},(_,i)=>[x+r*Math.cos(i/n*Math.PI*2),y+r*Math.sin(i/n*Math.PI*2)]);
   const ticks=(p,q)=>{const L=D(p,q)||1;const nx=-(q[1]-p[1])/L*fs*.45,ny=(q[0]-p[0])/L*fs*.45;for(const e of [p,q])poly([[e[0]-nx,e[1]-ny],[e[0]+nx,e[1]+ny]],{w:w*.8})};
@@ -3554,12 +3575,15 @@ async function vPdfSegs(pi){const page=pi===VW.pi?VW.page:await VW.pdf.getPage(p
     case O.endPath:pend.length=0;has=false;break}if(!(i%50000))await sleep(0)}
   return out.subarray(0,n)}
 /* snap a page point to corners / lines of the plan, and to your own marks */
-function vSnapPt(p,touch){const tol=(touch?24:13)/VW.view.k;let best=null;const S=VW.segs[VW.pi];const consider=(q,kind,d)=>{if(d<tol&&(!best||d<best.d-(kind==='end'?tol*.35:0)||(kind==='end'&&best.kind!=='end'&&d<tol*.75)))best={p:q,kind,d}};
-  const chk=(x1,y1,x2,y2)=>{const e1=Math.hypot(p[0]-x1,p[1]-y1),e2=Math.hypot(p[0]-x2,p[1]-y2);if(e1<tol)consider([x1,y1],'end',e1*.6);if(e2<tol)consider([x2,y2],'end',e2*.6);const dx=x2-x1,dy=y2-y1,l=dx*dx+dy*dy;if(!l)return;let t=((p[0]-x1)*dx+(p[1]-y1)*dy)/l;if(t<0||t>1)return;const qx=x1+t*dx,qy=y1+t*dy;const d=Math.hypot(p[0]-qx,p[1]-qy);consider([qx,qy],'on',d);if(Math.abs(t-.5)<.03)consider([x1+dx/2,y1+dy/2],'mid',d*.8)};
+function vSnapPt(p,touch){const tol=(touch?24:13)/VW.view.k;let best=null;const S=VW.segs[VW.pi];let curDir=null;const consider=(q,kind,d)=>{if(d<tol&&(!best||d<best.d-(kind==='end'?tol*.35:0)||(kind==='end'&&best.kind!=='end'&&d<tol*.75)))best={p:q,kind,d,dir:kind!=='end'?curDir:null}};
+  const chk=(x1,y1,x2,y2)=>{curDir=[x2-x1,y2-y1];const e1=Math.hypot(p[0]-x1,p[1]-y1),e2=Math.hypot(p[0]-x2,p[1]-y2);if(e1<tol)consider([x1,y1],'end',e1*.6);if(e2<tol)consider([x2,y2],'end',e2*.6);const dx=x2-x1,dy=y2-y1,l=dx*dx+dy*dy;if(!l)return;let t=((p[0]-x1)*dx+(p[1]-y1)*dy)/l;if(t<0||t>1)return;const qx=x1+t*dx,qy=y1+t*dy;const d=Math.hypot(p[0]-qx,p[1]-qy);consider([qx,qy],'on',d);if(Math.abs(t-.5)<.03)consider([x1+dx/2,y1+dy/2],'mid',d*.8)};
   if(S&&S.grid){const a=S.a,cs=S.cs;const c0=Math.floor((p[0]-tol)/cs),c1=Math.floor((p[0]+tol)/cs),r0=Math.floor((p[1]-tol)/cs),r1=Math.floor((p[1]+tol)/cs);const seen=new Set();
     for(let x=c0;x<=c1;x++)for(let y=r0;y<=r1;y++){const L=S.grid.get(x*100003+y);if(!L)continue;for(const j of L){if(seen.has(j))continue;seen.add(j);chk(a[j*4],a[j*4+1],a[j*4+2],a[j*4+3])}}for(const j of S.long)chk(a[j*4],a[j*4+1],a[j*4+2],a[j*4+3])}
   for(const an of vAnns()){if(an.t==='pen'||an.t==='hl'||an.t==='text')continue;const pts=an.pts;for(let i=0;i<pts.length;i++){const e=Math.hypot(p[0]-pts[i][0],p[1]-pts[i][1]);if(e<tol)consider(pts[i],'end',e*.6);if(i&&(an.t==='ext'||an.t==='line'||an.t==='len'||an.t==='poly'||an.t==='area'))chk(pts[i-1][0],pts[i-1][1],pts[i][0],pts[i][1])}}
   return best}
+/* wall thickness: from a point on one wall, straight across (perpendicular) to the next wall line */
+function vPerp(t,w,touch){const a=t.pts[0],d=t.perp;const L=Math.hypot(d[0],d[1])||1;const nx=-d[1]/L,ny=d[0]/L;const s=(w[0]-a[0])*nx+(w[1]-a[1])*ny;let p=[a[0]+nx*s,a[1]+ny*s];
+  const sn=vSnapPt(p,touch);if(sn&&sn.dir){const e=sn.dir;const den=nx*e[1]-ny*e[0];if(Math.abs(den)>1e-9){const q=sn.p;const tt=((q[0]-a[0])*e[1]-(q[1]-a[1])*e[0])/den;p=[a[0]+nx*tt,a[1]+ny*tt];VW.snap={p,kind:'on'}}}return p}
 function vOrtho(a,p){const dx=p[0]-a[0],dy=p[1]-a[1];const ang=Math.round(Math.atan2(dy,dx)/(Math.PI/4))*(Math.PI/4);const L=Math.hypot(dx,dy);return [a[0]+Math.cos(ang)*L,a[1]+Math.sin(ang)*L]}
 function vNearSeg(p){const S=VW.segs[VW.pi];if(!S||!S.grid)return null;const tol=22/VW.view.k;let best=null;const a=S.a,cs=S.cs;const c0=Math.floor((p[0]-tol)/cs),c1=Math.floor((p[0]+tol)/cs),r0=Math.floor((p[1]-tol)/cs),r1=Math.floor((p[1]+tol)/cs);
   const chk=j=>{const x1=a[j*4],y1=a[j*4+1],x2=a[j*4+2],y2=a[j*4+3];const L=Math.hypot(x2-x1,y2-y1);if(L<4/VW.view.k)return;const d=distSeg(p,[x1,y1],[x2,y2]);if(d<tol&&(!best||d<best.d-1e-9||(Math.abs(d-best.d)<tol*.2&&L>best.L)))best={d,L,a:[x1,y1],b:[x2,y2]}};
@@ -3583,7 +3607,7 @@ function vDown(e){const sp=vPt(e);VW.ptr.set(e.pointerId,{p:sp,t:e.pointerType})
     if(VW.ortho&&pts.length&&t!=='count')p=vOrtho(pts[pts.length-1],p);pts.push(p);VW.gest={k:'adjust',touch};if(t==='angle'&&pts.length===3){vFinishMulti();VW.gest=null;return}vLoupe(touch?sp:null,p);vAnnRender();vProps();return}
   /* two-point and freehand tools */
   if(VW.tmp&&VW.tmp.click){const a=VW.tmp;let q=p;if(VW.ortho||VW.shift)q=vOrtho(a.pts[0],q);a.pts[1]=q;VW.gest={k:'adjust2',touch};vAnnRender();return}
-  const c=t==='hl'?VW.hlc:VW.color;VW.tmp={id:uid(),t,pts:[p,p],c,w:vWidth(t),fs:vFs()};if(t==='pen'||t==='hl')VW.tmp.pts=[w];VW.gest={k:'draw',s:sp,touch};vLoupe(touch&&t!=='pen'&&t!=='hl'?sp:null,p);vAnnRender()}
+  const c=t==='hl'?VW.hlc:VW.color;VW.tmp={id:uid(),t,pts:[p,p],c,w:vWidth(t),fs:vFs(),perp:sn&&sn.dir&&(t==='len'||t==='scale')?sn.dir:null};if(t==='pen'||t==='hl')VW.tmp.pts=[w];VW.gest={k:'draw',s:sp,touch};vLoupe(touch&&t!=='pen'&&t!=='hl'?sp:null,p);vAnnRender()}
 function vMove(e){const sp=vPt(e);const pr=VW.ptr.get(e.pointerId);if(pr)pr.p=sp;
   if(VW.pinch&&VW.ptr.size>=2){const [a,b]=[...VW.ptr.values()];const d=D(a.p,b.p),m=[(a.p[0]+b.p[0])/2,(a.p[1]+b.p[1])/2];const P=VW.pinch;const k=clamp(P.v.k*d/P.d,(VW.k0||1)*.25,Math.max(40,(VW.k0||1)*600));const r=k/P.v.k;VW.view={k,tx:m[0]-(P.m[0]-P.v.tx)*r,ty:m[1]-(P.m[1]-P.v.ty)*r};vViewChanged();return}
   const g=VW.gest;const w=s2v(...sp);const touch=e.pointerType!=='mouse';
@@ -3595,7 +3619,8 @@ function vMove(e){const sp=vPt(e);const pr=VW.ptr.get(e.pointerId);if(pr)pr.p=sp
   if(g.k==='draw'&&(t.t==='pen'||t.t==='hl')){if(t.t==='hl'&&(VW.ortho||VW.shift)){t.pts=[t.pts[0],vOrtho(t.pts[0],w)];t.straight=true}else{const last=t.pts[t.pts.length-1];if(D(last,w)*VW.view.k>1.5)t.pts.push(w)}vAnnRenderTmp();return}
   let p=w;const sn=vSnapPt(w,touch);VW.snap=sn;if(sn)p=sn.p;
   if(g.k==='adjust'){const pts=t.pts;if(VW.ortho&&pts.length>1&&t.t!=='count')p=vOrtho(pts[pts.length-2],p);pts[pts.length-1]=p}
-  else{if(VW.ortho||VW.shift||(t.t==='rect'||t.t==='ell'||t.t==='cloud')&&false)p=vOrtho(t.pts[0],p);t.pts[1]=p}
+  else if(t.perp&&(VW.ortho||VW.shift)){p=vPerp(t,w,touch);t.pts[1]=p}
+  else{if(VW.ortho||VW.shift)p=vOrtho(t.pts[0],p);t.pts[1]=p}
   vLoupe(touch?sp:null,p);vAnnRenderTmp()}
 function vUp(e){VW.ptr.delete(e.pointerId);if(VW.pinch){if(VW.ptr.size<2)VW.pinch=null;return}const g=VW.gest;VW.gest=null;vLoupe(null);
   if(!g)return;const sp=vPt(e);
@@ -3693,21 +3718,22 @@ async function vBuildPDF(opt={}){const L=await getLib('pdflib');let doc;const fo
     const font=await font0(doc);
     for(let n=0;n<idx.length;n++){const i=idx[n];const anns=VW.ann.pages[i]||[];if(!anns.length)continue;const pg=doc.getPage(opt.all?i:0);const p=await VW.pdf.getPage(i+1);const T=p.getViewport({scale:1}).transform;
       const det=T[0]*T[3]-T[1]*T[2];const inv=[T[3]/det,-T[1]/det,-T[2]/det,T[0]/det,(T[2]*T[5]-T[3]*T[4])/det,(T[1]*T[4]-T[0]*T[5])/det];const map=(u,v)=>[inv[0]*u+inv[2]*v+inv[4],inv[1]*u+inv[3]*v+inv[5]];
-      const savePi=VW.pi;VW.pi=i;const prims=anns.flatMap(a=>vPrims(a));VW.pi=savePi;vDrawPrims(pg,prims,map,1/Math.hypot(T[0],T[1]),font,L)}}
+      const savePi=VW.pi;VW.pi=i;const prims=anns.flatMap(a=>vPrims(a,false,.9*Math.hypot(T[0],T[1])));VW.pi=savePi;vDrawPrims(pg,prims,map,1/Math.hypot(T[0],T[1]),font,L)}}
   else if(VW.kind==='img'){doc=await L.PDFDocument.create();const font=await font0(doc);const P=VW.pages[0];const c=document.createElement('canvas');c.width=P.w;c.height=P.h;c.getContext('2d').drawImage(VW.img,0,0);const blob=await new Promise(r=>c.toBlob(r,'image/jpeg',.9));
     const im=await doc.embedJpg(new Uint8Array(await blob.arrayBuffer()));const sf=Math.min(1190/Math.max(P.w,P.h),1);const W=P.w*sf,H=P.h*sf;const pg=doc.addPage([W,H]);pg.drawImage(im,{x:0,y:0,width:W,height:H});
-    vDrawPrims(pg,(VW.ann.pages[0]||[]).flatMap(a=>vPrims(a)),(u,v)=>[u*sf,H-v*sf],sf,font,L)}
+    vDrawPrims(pg,(VW.ann.pages[0]||[]).flatMap(a=>vPrims(a,false,.9/sf)),(u,v)=>[u*sf,H-v*sf],sf,font,L)}
   else if(VW.cad){doc=await L.PDFDocument.create();const font=await font0(doc);const C=VW.cad;const PAP={A4:[297,210],A3:[420,297],A2:[594,420],A1:[841,594],A0:[1189,841]};const mm=72/25.4;
     let pk=opt.paper||'auto';if(pk==='auto'){const big=Math.max(C.w,C.h)*(VW.ann.scale[0]||.001);pk=big>120?'A0':big>60?'A1':'A3'}let [pw,ph]=PAP[pk];if((C.h>C.w)!==(ph>pw))[pw,ph]=[ph,pw];const W=pw*mm,H=ph*mm,M=10*mm;
     let sf=Math.min((W-2*M)/C.w,(H-2*M)/C.h),ox=(W-C.w*sf)/2,oy=(H-C.h*sf)/2;
     if(opt.N){const mpu=VW.ann.scale[0]||.001;const s2=mpu*1000/opt.N*mm;if(s2<sf){sf=s2;ox=(W-C.w*sf)/2;oy=(H-C.h*sf)/2}}
     const pg=doc.addPage([W,H]);const lw=Math.max(.18,.25);
+    for(const f of C.fills||[]){if(VW.hid.has(f.lay))continue;let d='';for(const lp of f.loops){d+='M'+lp.map(q=>(ox+q[0]*sf).toFixed(2)+' '+(oy+q[1]*sf).toFixed(2)).join('L')+'Z';if(d.length>200000){pg.drawSvgPath(d,{x:0,y:H,color:pdfColor(f.col,L),opacity:f.solid?.55:.16});d=''}}if(d)pg.drawSvgPath(d,{x:0,y:H,color:pdfColor(f.col,L),opacity:f.solid?.55:.16})}
     for(const g of C.groups){if(VW.hid.has(g.lay))continue;const a=g.a;let d='';let cnt=0;const flush=()=>{if(d){pg.drawSvgPath(d,{x:0,y:H,borderColor:pdfColor(g.col,L),borderWidth:lw});d='';cnt=0}};
       for(let k=0;k<a.length;k+=4){d+=`M${(ox+a[k]*sf).toFixed(2)} ${(oy+a[k+1]*sf).toFixed(2)}L${(ox+a[k+2]*sf).toFixed(2)} ${(oy+a[k+3]*sf).toFixed(2)}`;if(++cnt>4000)flush()}flush()}
     if(font)for(const t of C.texts){if(VW.hid.has(t.lay))continue;const size=t.h*sf*1.05;if(size<1.2)continue;const lines=t.s.split('\n');const ang=-t.rot;const ca=Math.cos(ang),sa=Math.sin(ang);
       lines.forEach((ln,j)=>{const s=visOrder(ln);let w=0;try{w=font.widthOfTextAtSize(s,size)}catch(e){return}const dx=t.al==='center'?-w/2:t.al==='right'?-w:0;const dy=(t.bl==='top'?-size*.8:t.bl==='middle'?-size*.35:t.bl==='bottom'?size*.2:0)-j*size*1.6/1.05;
         const bx=ox+t.x*sf,by=H-(oy+t.y*sf);try{pg.drawText(s,{x:bx+dx*ca-dy*sa,y:by+dx*sa+dy*ca,size,font,color:pdfColor(t.col,L),rotate:L.degrees(ang*180/Math.PI)})}catch(e){}})}
-    vDrawPrims(pg,(VW.ann.pages[0]||[]).flatMap(a=>vPrims(a)),(u,v)=>[ox+u*sf,H-(oy+v*sf)],sf,font,L)}
+    vDrawPrims(pg,(VW.ann.pages[0]||[]).flatMap(a=>vPrims(a,false,.9/sf)),(u,v)=>[ox+u*sf,H-(oy+v*sf)],sf,font,L)}
   doc.setTitle(VW.meta.name);doc.setProducer('FALILO');return new Blob([await doc.save()],{type:'application/pdf'})}
 function vPdfName(){return VW.meta.name.replace(/\.[^.]+$/,'')+(VW.kind==='pdf'?' - מסומן':'')+'.pdf'}
 async function vShareMenu(){const canShare=!!navigator.share;const multi=VW.kind==='pdf'&&VW.pages.length>1;const cad=!!VW.cad;const toDraw=VW.kind==='pdf'||VW.kind==='img'||cad;
@@ -3718,7 +3744,7 @@ async function vShareMenu(){const canShare=!!navigator.share;const multi=VW.kind
     <div class="opts"><button class="opt on" data-c="share"><b>${ic('share')} שיתוף PDF לכל אפליקציה</b><span>וואטסאפ, מייל, Drive – מה שמותקן במכשיר${canShare?'':' (במחשב הזה: הורדה)'}</span></button>
       <button class="opt" data-c="save"><b>${ic('dl')} שמירה כ-PDF במכשיר</b></button>
       ${PREF.gcid?`<button class="opt" data-c="link"><b>${ic('drive')} קישור לצפייה דרך Google Drive</b><span>מעלה את ה-PDF ל-Drive שלך ומעתיק קישור לשליחה</span></button>`:''}
-      ${toDraw?`<button class="opt" data-c="draw"><b>${ic('pen')} להעביר לשרטוט וכתב כמויות</b><span>פותח חשבון חדש אצל לקוח, עם התוכנית הזאת ברקע</span></button>`:''}
+      ${toDraw?`<button class="opt" data-c="draw"><b>${ic('pen')} להעביר לשרטוט וכתב כמויות</b><span>פותח חשבון חדש אצל לקוח עם התוכנית ברקע. מה שסימנת במרקר (צבע לכל סוג צנרת) ישורטט אוטומטית עם כתב כמויות</span></button>`:''}
       ${VW.kind!=='pdf'?`<button class="opt" data-c="orig"><b>${ic('file')} שיתוף הקובץ המקורי</b><span>${esc(VW.meta.name)}</span></button>`:''}</div></div><div class="mf"><button class="btn" data-x>ביטול</button></div>`);
   let all=true,paper='auto';
   m.onclick=async e=>{if(e.target.closest('[data-x]')){closeModal(m);return}const ex=e.target.closest('[data-vex]');if(ex){all=ex.dataset.vex==='all';$$('[data-vex]',m).forEach(b=>b.classList.toggle('on',b===ex));return}
@@ -3735,7 +3761,7 @@ async function vShareMenu(){const canShare=!!navigator.share;const multi=VW.kind
 async function vToDrawing(file){const projects=(await DB.all('projects')).sort((a,b)=>b.updated-a.updated);
   const r=await new Promise(res=>{const m=modal(`<div class="mh"><div><h2>לאיזה לקוח?</h2><p>ייפתח חשבון חדש עם התוכנית הזאת</p></div></div><div class="mb"><div class="opts">${projects.map(p=>`<button class="opt" data-p="${p.id}"><b>${esc(p.name)}</b></button>`).join('')}<button class="opt" data-p="new"><b>${ic('plus')} לקוח חדש</b></button></div></div><div class="mf"><button class="btn" data-x>ביטול</button></div>`,'');
     m.onclick=e=>{if(e.target.closest('[data-x]')){closeModal(m);res(null)}const b=e.target.closest('[data-p]');if(b){closeModal(m);res(b.dataset.p)}}});if(!r)return;
-  await vFlush();let pid=r;if(r==='new'){const P=await projectModal(null);if(!P)return;pid=P.id}homeProject=pid;PREF.sys='draw';savePref();window.__pendingFile=file;$('#vw').classList.add('hide');$('#vw').innerHTML='';VW.pdf=null;await goHome();startNewDrawing('pdf')}
+  await vFlush();let pid=r;if(r==='new'){const P=await projectModal(null);if(!P)return;pid=P.id}homeProject=pid;PREF.sys='draw';savePref();window.__pendingFile=file;if(VW.kind==='pdf'){const mk=vAnns().filter(a=>a.t==='hl'||a.t==='pen'||a.t==='line'||a.t==='poly').map(a=>({k:'ink',color:a.c,pts:a.pts.map(p=>p.slice()),w:a.w,id:a.id}));window.__pendingMarks=mk.length?{page:VW.pi+1,marks:mk}:null}$('#vw').classList.add('hide');$('#vw').innerHTML='';VW.pdf=null;await goHome();startNewDrawing('pdf')}
 
 /* =========================================================
    UI: home, modals, environment, projects, settings
@@ -3884,7 +3910,7 @@ function startModal(){closeAllModals();const m=modal(`<div class="mh"><div><h2>�
 async function uploadPlan(kind){
   const f=await pickFile(kind==='pdf'?'application/pdf,.pdf,image/*':'image/*,application/pdf',kind==='photo');if(!f)return;
   const pg=progress('קורא את התוכנית',['טוען']);
-  try{pg.set(.15,'טוען את הקובץ');const plan=await importPlanFile(f);if(!plan){pg.close();return}
+  try{pg.set(.15,'טוען את הקובץ');const plan=await importPlanFile(f);if(!plan){pg.close();return}if(window.__pendingMarks&&plan.kind==='pdf'){const pm=window.__pendingMarks;window.__pendingMarks=null;if(!pm.page||(plan.page||1)===pm.page)plan.marks=pm.marks}
     const d=S.drawing;const old=d.plan;d.plan=plan;d.ctx=null;d.autoDone=false;PL.data=null;PL.vec=null;
     pg.set(.45,'מציג את התוכנית');await openPlanRuntime(plan);
     let info=null;
