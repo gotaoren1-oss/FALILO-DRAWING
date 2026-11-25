@@ -2668,7 +2668,7 @@ async function onEdClick(e){
     case 'savedlg':saveModal();break;
     case 'rename':{const v=await promptModal('שם החשבון / הגיליון',S.drawing.name);if(v)mut(()=>{S.drawing.name=v});const f=await promptModal('קומה / אזור (לא חובה)',S.drawing.floor||'');if(f!==null)mut(()=>{S.drawing.floor=f});break}
     case 'scale':scaleModal();break;
-    case 'pagetoggle':{PREF.showPage=!PREF.showPage;savePref();PAGE_C=null;renderStage();setTimeout(()=>{renderFloat();fitPage()},40);break}
+    case 'pagetoggle':pageMenu();break;
     case 'plantoggle':{const d=S.drawing;d.layers=d.layers||{};const st=d.layers.plan||{};d.layers.plan={...st,hidden:!st.hidden};PL.sharp=null;renderFloat();renderSide();renderStage();scheduleSave();break}
     case 'bgalpha':{const opts=[0,.15,.32,.5,.8];const cur=S.drawing.bgAlpha??.32;S.drawing.bgAlpha=opts[(opts.indexOf(cur)+1)%opts.length];S.drawing.hideBg=S.drawing.bgAlpha===0;PL.sharp=null;renderFloat();renderStage();scheduleSave();break}
     case 'newtype':typeModal(null);break;case 'newitem':addToLibrary();break;
@@ -2783,6 +2783,23 @@ async function drawAllModal(region){const d=S.drawing;if(!d.plan||d.plan.kind!==
 function scrollCue(el){if(!el)return;const more=el.scrollWidth>el.clientWidth+4;el.classList.toggle('more',more);el.classList.toggle('atend',!more||Math.abs(el.scrollLeft)+el.clientWidth>=el.scrollWidth-4)}
 document.addEventListener('scroll',ev=>{const el=ev.target;if(el instanceof Element&&el.matches('.tools,.pbar'))scrollCue(el)},true);
 setInterval(()=>{if(S.drawing)document.querySelectorAll('.tools,.pbar').forEach(scrollCue)},900);
+
+/* page settings right from the drawing: show/hide the page, paper, direction, print scale – everything redraws at once */
+function pageMenu(){const d=S.drawing;const L=PAGE_LAY||{};const has=d.objects.some(o=>o.t==='pipe'||o.t==='item');
+  const m=modal(`<div class="mh"><div><h2>הדף</h2><p>${has&&L.pk?`עכשיו: ${L.pk} · ${L.orient==='portrait'?'לאורך':'לרוחב'} · 1:${L.N}`:'הדף יופיע אחרי שמשרטטים משהו'}</p></div></div><div class="mb">
+    <label class="row" style="font-size:15px;gap:10px"><input type="checkbox" id="pgShow" ${PREF.showPage?'checked':''} style="width:22px;height:22px">להציג את הדף בזמן השרטוט (מה שרואים = מה שיודפס)</label>
+    <div class="lbl">גודל דף</div><div class="chips">${['A4','A3','A2','A1','A0'].map(p=>`<button class="chip ${L.pk===p?'on':''}" data-pp="${p}">${p}</button>`).join('')}</div>
+    <div class="lbl">כיוון</div><div class="chips"><button class="chip ${L.orient==='landscape'?'on':''}" data-po="landscape">לרוחב</button><button class="chip ${L.orient==='portrait'?'on':''}" data-po="portrait">לאורך</button></div>
+    <div class="lbl">קנה מידה בהדפסה</div><div class="chips">${[20,25,50,75,100,125,150,200,250,500].map(n=>`<button class="chip ${L.N===n?'on':''}" data-pn="${n}">1:${n}</button>`).join('')}</div>
+    <div style="font-size:12.5px;color:var(--muted2);line-height:1.6;margin-top:8px">הצנרת נשארת במטרים אמיתיים. השוחות, האביזרים, התוויות והטקסט שומרים על גודל קריא על הנייר בכל קנה מידה.</div>
+    </div><div class="mf"><button class="btn pri" data-x>סגירה</button><button class="btn" data-pfit>התאמה אוטומטית</button></div>`);
+  const apply=fn=>{fn();relock();PAGE_C=null;renderStage();setTimeout(()=>{renderFloat();fitPage()},40);closeModal(m);toast(`הדף עודכן: ${PAGE_LAY?PAGE_LAY.pk+' · 1:'+PAGE_LAY.N:''}`)};
+  m.onclick=ev=>{const t=ev.target;if(t.closest('[data-x]'))closeModal(m);
+    const pp=t.closest('[data-pp]');if(pp)apply(()=>{SH.paper=pp.dataset.pp;SH.N=null});
+    const po=t.closest('[data-po]');if(po)apply(()=>{SH.orient=po.dataset.po});
+    const pn=t.closest('[data-pn]');if(pn)apply(()=>{SH.N=+pn.dataset.pn});
+    if(t.closest('[data-pfit]'))apply(()=>{SH.paper='auto';SH.orient='auto';SH.N=null})};
+  $('#pgShow',m).onchange=ev=>{PREF.showPage=ev.target.checked;savePref();PAGE_C=null;renderStage();setTimeout(()=>{renderFloat();fitPage()},40)}}
 
 /* =========================================================
    submission sheet (clean engineering page), PDF / DXF / Excel
@@ -2965,7 +2982,7 @@ async function renderSheet(){const d=S.drawing;const urls={};for(const o of d.ob
     <label class="row" style="font-size:14px"><input type="checkbox" id="shSent" ${d.status==='sent'?'checked':''} style="width:20px;height:20px">לסמן את החשבון כ"הוגש"</label>`;
 }
 /* user picked paper/direction/scale → compute once with that choice, store it in the drawing, then back to 'locked' */
-function relock(){const d=S.drawing;const cur=d.lay;if(cur&&(SH.paper!=='auto'||SH.orient!=='auto'||SH.N)){if(SH.paper==='auto')SH.paper=cur.pk;if(SH.orient==='auto')SH.orient=cur.orient}d.lay=null;planSheet(d);SH.paper='auto';SH.orient='auto';SH.N=null;scheduleSave()}
+function relock(){if(typeof PAGE_C!=='undefined')PAGE_C=null;const d=S.drawing;const cur=d.lay;if(cur&&(SH.paper!=='auto'||SH.orient!=='auto'||SH.N)){if(SH.paper==='auto')SH.paper=cur.pk;if(SH.orient==='auto')SH.orient=cur.orient}d.lay=null;planSheet(d);SH.paper='auto';SH.orient='auto';SH.N=null;scheduleSave()}
 function onSheetChange(e){const t=e.target;if(t.dataset.opt){SH[t.dataset.opt]=t.checked;renderSheet()}if(t.id==='shN'){SH.N=+t.value||null;relock();renderSheet()}if(t.id==='shT'){S.drawing.sheetTitle=t.value;scheduleSave();renderSheet()}if(t.id==='shSent'){S.drawing.status=t.checked?'sent':'work';scheduleSave()}}
 async function onSheetClick(e){const t=e.target.closest('[data-sa],[data-paper],[data-orient],[data-pg]');if(!t)return;const ds=t.dataset;
   if(ds.paper){SH.paper=ds.paper;SH.N=null;relock();renderSheet();return}if(ds.orient){SH.orient=ds.orient;relock();renderSheet();return}if(ds.pg){SH.page=+ds.pg;renderSheet();return}
