@@ -1,0 +1,1 @@
+self.onmessage=async e=>{try{const m=await import('./dist/libredwg-web.js');const L=await m.LibreDwg.create(new URL('./wasm/',self.location.href).href);const p=L.dwg_read_data(e.data,0);if(!p)throw new Error('DWG');const db=L.convert(p);self.postMessage({db})}catch(err){self.postMessage({err:String(err&&err.message||err)})}}

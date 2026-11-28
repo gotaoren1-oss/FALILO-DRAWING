@@ -1,0 +1,1 @@
+libredwg-web (GPL-3.0) – https://github.com/mlightcad/libredwg-web – source code available there.

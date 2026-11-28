@@ -2761,7 +2761,10 @@ async function autoModal(region){
   if(d.plan.kind==='pdf'&&!d.plan.N){const ok=await scaleModal(true);if(!ok)return}
   if(d.plan.kind==='img'&&!d.plan.mpp){toast('קודם מכיילים: מסמנים קו שהאורך שלו ידוע');startCalib();return}
   let groups;
-  if(d.plan.kind==='pdf'){const data=await readPlanData();const kM=planK(d.plan);const inR=m=>!region||m.pts.some(p=>{const x=p[0]*kM,y=p[1]*kM;return x>=region.x0&&x<=region.x1&&y>=region.y0&&y<=region.y1});groups=groupMarks(data.marks.filter(inR))}
+  if(d.plan.kind==='pdf'){const data=await readPlanData();const kM=planK(d.plan);const inR=m=>!region||m.pts.some(p=>{const x=p[0]*kM,y=p[1]*kM;return x>=region.x0&&x<=region.x1&&y>=region.y0&&y<=region.y1});
+    const hasFal=data.marks.some(m=>isFalPipe(m.color)||isFalItem(m.color));
+    if(hasFal&&!FAL_OTHERS){await falRun(data,region);return}   /* FALILO colours found: only they count */
+    const incl=FAL_OTHERS;FAL_OTHERS=false;groups=groupMarks(data.marks.filter(inR).filter(m=>!incl||!(isFalPipe(m.color)||isFalItem(m.color))))}
   else{groups=detectImageColors(PL.img).map(c=>({key:c,color:c,marks:[],kinds:{},measured:0,len:0,img:true}))}
   if(!groups.length){toast(region?'לא נמצאו סימונים באזור הזה':'לא נמצאו סימוני מרקר בקובץ. אפשר לשרטט ביד, או לסמן בתוכנה שלך ולהעלות שוב');return}
   const choices=await marksModal(groups,!!region);if(!choices)return;
@@ -3053,6 +3056,110 @@ function cleanAutoPipes(newIds){const d=S.drawing;const ids=new Set(newIds);cons
   const pipes=runs.map(r=>({id:uid(),t:'pipe',pts:r.pts,typeId:r.typeId,auto:true,ok:!!r.typeId,undef:!r.typeId}));
   const mhItems=[];for(const m of manholes){if(keepItems.some(q=>D([q.x,q.y],[m.x,m.y])<.5))continue;const it=manholeFor('',null);if(it)mhItems.push({id:uid(),t:'item',itemId:it.id,x:m.x,y:m.y,auto:true,ok:true,src:'סמל שוחה בתוכנית'})}
   d.objects=[...d.objects.filter(o=>!ids.has(o.id)||o.t!=='pipe'),...pipes,...mhItems];return {pipes:pipes.length,manholes:mhItems.length}}
+
+/* =========================================================
+   FALILO marking mode: only the agreed colours count.
+   pink #FF2EC4 – exactly on what you want: a pipe line, a fitting/manhole symbol, or the text with its size/type
+   purple #7A2EFF – manholes
+   everything else in the file is ignored (unless you choose to include it)
+   ========================================================= */
+const isFalPipe=c=>c&&colorDist(c,'#ff2ec4')<55,isFalItem=c=>c&&colorDist(c,'#7a2eff')<55;
+function falModal(data,region){return new Promise(res=>{const d=S.drawing;const kM=planK(d.plan);
+  const inR=m=>!region||m.pts.some(p=>{const x=p[0]*kM,y=p[1]*kM;return x>=region.x0&&x<=region.x1&&y>=region.y0&&y<=region.y1});
+  const all=data.marks.filter(inR);const pink=all.filter(m=>isFalPipe(m.color)),purple=all.filter(m=>isFalItem(m.color)),other=all.filter(m=>!isFalPipe(m.color)&&!isFalItem(m.color));
+  const L=lib();const mhs=L.items.filter(i=>!i.riser&&itemShape(i));const defMh=(mhs.find(i=>!i.baseName&&/ניקוז/.test(i.name))||mhs[0]||{}).id;
+  const og=groupMarks(other);
+  const m=modal(`<div class="mh"><div><h2>סימון FALILO</h2><p>נמצא הסימון שלך. רק הוא ישורטט – כל השאר בקובץ לא נחשב.</p></div></div><div class="mb">
+    <div class="crow"><span class="swb" style="background:#FF2EC4"></span><div class="grow"><b style="font-size:15px">★ ורוד – ${pink.length} סימונים</b><div style="font-size:13px;color:var(--muted2);line-height:1.5">מה שמתחת לכל סימון: קו → צינור · סמל → שוחה/אביזר · כיתוב → קוטר וסוג לצינור הקרוב</div></div></div>
+    <div class="crow"><span class="swb" style="background:#7A2EFF"></span><div class="grow"><b style="font-size:15px">★ סגול – ${purple.length} שוחות</b></div><select class="f" id="fmh" style="width:230px">${mhs.map(i=>`<option value="${i.id}" ${i.id===defMh?'selected':''}>${esc(itemFull(i))}</option>`).join('')}</select></div>
+    ${other.length?`<details style="margin-top:10px"><summary style="cursor:pointer;color:var(--muted2);font-size:14px">סימונים אחרים בקובץ (${other.length}) – לא ישורטטו</summary><div style="padding:8px 0;font-size:13.5px;color:var(--muted2)">${og.map(g=>`<span class="swb" style="background:${g.color};display:inline-block;width:14px;height:14px;vertical-align:middle"></span> ${g.marks.length}`).join(' · ')}<label class="row" style="gap:8px;margin-top:8px"><input type="checkbox" id="foth" style="width:20px;height:20px">לכלול גם אותם (נבחר מה כל צבע במסך הבא)</label></div></details>`:''}
+    </div><div class="mf"><button class="btn pri" data-ok>${ic('brain')}לשרטט</button><button class="btn" data-x>ביטול</button></div>`,'wide');
+  m.onclick=e=>{if(e.target.closest('[data-x]')){closeModal(m);res(null)}if(e.target.closest('[data-ok]')){const o=$('#foth',m);const r={pink,purple,mhId:$('#fmh',m)?$('#fmh',m).value:defMh,others:o&&o.checked};closeModal(m);res(r)}}})}
+
+async function falAutoDraw(ch,region,prog=()=>{}){const d=S.drawing;const plan=d.plan;const kM=planK(plan);
+  prog(.08,'קורא את קווי התוכנית');const vec=await readVectors(p=>prog(.08+p*.3,'קורא את קווי התוכנית'));const pal=PL.vecPal,C=PL.vecC;const data=await readPlanData();
+  const T=textsDecoded(data);
+  /* only lines near the marks are considered */
+  const strokes=ch.pink.map(m=>({pts:m.pts,r:Math.max(2.5,(m.w||8)/2+1.2)}));const allPts=strokes.flatMap(s=>s.pts);if(!allPts.length&&!ch.purple.length)return null;
+  const sb=allPts.length?bboxOf(allPts,30):{x0:0,y0:0,x1:0,y1:0};const G=new Grid(20);const near=[];
+  if(vec)for(let i=0,j=0;i<vec.length;i+=4,j++){const ax=vec[i],ay=vec[i+1],bx=vec[i+2],by=vec[i+3];if(Math.max(ax,bx)<sb.x0||Math.min(ax,bx)>sb.x1||Math.max(ay,by)<sb.y0||Math.min(ay,by)>sb.y1)continue;const col=String(pal[C[j]]||'');if(isFalCol(col))continue;if(Math.hypot(bx-ax,by-ay)<.4)continue;near.push([ax,ay,bx,by]);G.addBox(Math.min(ax,bx),Math.min(ay,by),Math.max(ax,bx),Math.max(ay,by),near.length-1)}
+  prog(.45,'מבין מה סימנת');
+  const pipeSegs=[],itemPts=[],infos=[];
+  for(const s of strokes){const P=s.pts;const b=bboxOf(P,s.r);const ext=Math.max(b.x1-b.x0,b.y1-b.y0);const strokeLen=polyLen(P);
+    const dirAt=p=>{let best=0,bd=1e9;for(let i=1;i<P.length;i++){const dd=distSeg(p,P[i-1],P[i]);if(dd<bd){bd=dd;best=i}}const a=P[Math.max(0,best-1)],c=P[best]||a;const L=Math.hypot(c[0]-a[0],c[1]-a[1])||1;return [(c[0]-a[0])/L,(c[1]-a[1])/L,bd]};
+    /* texts under the mark */
+    const tx=T.filter(t=>{const [,,dd]=dirAt([t.x,t.y]);return dd<s.r+Math.max(2,t.h*.6)});
+    /* lines under the mark, running along it */
+    const along=[];let alongLen=0;const any=[];
+    for(const k of G.query(b.x0,b.y0,b.x1,b.y1)){const g=near[k];const a=[g[0],g[1]],c=[g[2],g[3]];const L=D(a,c);const n=Math.max(2,Math.ceil(L/1.5));let inside=0,t0=-1,t1=-1;
+      for(let q=0;q<=n;q++){const t=q/n;const p=[a[0]+(c[0]-a[0])*t,a[1]+(c[1]-a[1])*t];const [dx,dy,dd]=dirAt(p);if(dd<s.r){inside++;if(t0<0)t0=t;t1=t}}
+      if(!inside)continue;const fr=inside/(n+1);any.push({g,fr});const [dx,dy]=dirAt([(a[0]+c[0])/2,(a[1]+c[1])/2]);const cos=Math.abs(((c[0]-a[0])*dx+(c[1]-a[1])*dy)/(L||1));
+      if(cos>.9&&(t1-t0)*L>=Math.min(3,L*.5)){const pa=[a[0]+(c[0]-a[0])*t0,a[1]+(c[1]-a[1])*t0],pb=[a[0]+(c[0]-a[0])*t1,a[1]+(c[1]-a[1])*t1];along.push([pa,pb]);alongLen+=D(pa,pb)}}
+    /* what is it? */
+    const sd=tx.map(t=>slopeDiaOf(t.d)||slopeDiaOf(t.d2)||(()=>{const p=parsePipeText(t.d,true);return p&&(p.dia||p.mat)?{dia:p.dia,mat:p.mat}:null})()).filter(Boolean);
+    if(tx.length&&(alongLen<strokeLen*.35)){if(sd.length){const c=tx.reduce((a,t)=>[a[0]+t.x/tx.length,a[1]+t.y/tx.length],[0,0]);infos.push({x:c[0]*kM,y:c[1]*kM,sd:sd[0],raw:tx.map(t=>t.d).join(' ')})}continue}
+    if(ext*kM<2.6&&alongLen<strokeLen*.5){/* a short mark over a symbol → manhole / fitting at the symbol's centre */
+      const segs=any.filter(x=>x.fr>.5).map(x=>({a:[x.g[0]*kM,x.g[1]*kM],b:[x.g[2]*kM,x.g[3]*kM]}));const mh=findManholes(segs)[0];const bb=bboxOf(P);
+      itemPts.push(mh?{x:mh.x,y:mh.y,w:mh.w,h:mh.h,round:mh.round,sym:true}:{x:(bb.x0+bb.x1)/2*kM,y:(bb.y0+bb.y1)/2*kM});continue}
+    /* the marked route is the pipe; the plan line under it only makes it exact (each point moves onto the line it covers) */
+    const snapped=P.map(p=>{let best=null,bd=s.r*1.2;for(const [pa,pb] of along){const q=projSeg(p,pa,pb);const dd=Math.hypot(p[0]-q[0],p[1]-q[1]);if(dd<bd){bd=dd;best=q}}return best?[best[0],best[1]]:p});
+    pipeSegs.push({route:snapped.map(p=>[p[0]*kM,p[1]*kM]),r:s.r*kM})}
+  /* purple = manholes */
+  for(const m of ch.purple){const bb=bboxOf(m.pts);itemPts.push({x:(bb.x0+bb.x1)/2*kM,y:(bb.y0+bb.y1)/2*kM,purple:true})}
+  prog(.65,'בונה מקטעים משוחה לשוחה');
+  const net=falRoutes(pipeSegs,itemPts.map(p=>[p.x,p.y]));
+  /* manholes: explicit marks first, then symbols found inside the marked lines; pipes end at their centre */
+  const mhs=[...itemPts.map(p=>({x:p.x,y:p.y,w:p.w||.8,h:p.h||.8,src:p})),...net.manholes.filter(q=>!itemPts.some(p=>D([p.x,p.y],[q.x,q.y])<1)).map(q=>({...q,src:{sym:true}}))];
+  let runs=net.runs.map(r=>r.pts);
+  for(const m of mhs){const R=Math.max(1.2,Math.max(m.w,m.h));const out=[];for(const r of runs){let cut=-1;for(let i=1;i<r.length&&cut<0;i++){const q=projSeg([m.x,m.y],r[i-1],r[i]);if(Math.hypot(q[0]-m.x,q[1]-m.y)<R*.7&&q[2]>.03&&q[2]<.97){r.splice(i,0,[m.x,m.y]);cut=i}}
+      if(cut>0&&cut<r.length-1)out.push(r.slice(0,cut+1),r.slice(cut));else out.push(r)}
+    runs=out.map(r=>{const p=r.slice();for(const k of [0,p.length-1])if(D(p[k],[m.x,m.y])<R)p[k]=[m.x,m.y];return p}).filter(r=>polyLen(r)>=.3)}
+  /* type: from the marked text nearest to each segment; otherwise you choose */
+  const typeFor=sd=>{const L2=lib();let t=sd.dia?findOrMakeType(sd.mat||'',sd.dia,null,diaColor(sd.dia)):null;if(!t&&sd.dia){t=L2.pipes.find(p=>!p.mat&&p.dia===sd.dia);if(!t){t={id:uid(),mat:'',dia:sd.dia,name:`צינור ${sd.dia}`,color:diaColor(sd.dia),w:2.6,section:'',desc:''};L2.pipes.push(t)}}return t};
+  const pipes=runs.map(r=>({id:uid(),t:'pipe',pts:r,typeId:null,auto:true,ok:true,src:''}));
+  for(const inf of infos){let best=null,bd=8;for(const o of pipes){const [dd]=distPoly([inf.x,inf.y],o.pts);if(dd<bd){bd=dd;best=o}}if(best){const t=typeFor(inf.sd);if(t){best.typeId=t.id;best.src=inf.raw.slice(0,40)}}}
+  /* a marked size given once applies along the same straight line until the next manhole */
+  for(const o of pipes)if(!o.typeId){o.undef=true;o.ok=false}
+  const L=lib();const items=mhs.map(m=>{let it=itemT(ch.mhId)||manholeFor('',null);if(m.src&&m.src.sym&&!m.src.purple&&m.w&&it&&itemShape(it)&&Math.max(m.w,m.h)>=.4&&Math.max(m.w,m.h)<=2.2){const base=it.baseName?L.items.find(i=>i.name===it.baseName&&!i.baseName)||it:it;it=m.round?itemVariant(base,'round','Ø'+Math.round(m.w*10)*10):itemVariant(base,'square',`${Math.round(m.w*10)*10}×${Math.round(m.h*10)*10}`)}
+    return it?{id:uid(),t:'item',itemId:it.id,x:m.x,y:m.y,auto:true,ok:true,src:m.src&&m.src.purple?'סימון סגול':'סימון'}:null}).filter(Boolean);
+  prog(.85,'מבנה ברקע');let ctx=null;try{if(vec&&pipes.length){ctx=buildContext(pipes,vec,data.texts,kM,{radius:3,grids:2});if(ctx){ctx.style='clean';ctx.texts=[]}}}catch(e){console.warn(e)}
+  pushUndo();const keep=d.objects.filter(o=>!(o.auto&&!o.locked&&(!region||inRect(o,region))));d.lay=null;d.objects=[...keep,...pipes,...items];if(ctx)d.ctx=ctx;
+  d.layers=d.layers||{};d.layers.plan={...(d.layers.plan||{}),hidden:true};d.autoDone=true;
+  return {pipes,items,untyped:pipes.filter(o=>!o.typeId).length,infos:infos.length}}
+
+async function falRun(data,region){const ch=await falModal(data,region);if(!ch)return;
+  const pg=progress('משרטט לפי סימון FALILO',['']);let r;try{r=await falAutoDraw(ch,region,(f,t)=>pg.set(f,t))}catch(e){pg.close();console.error(e);toast('השרטוט נכשל: '+e.message,6000);return}pg.close();
+  if(!r){toast('לא נמצא סימון לשרטוט');return}S.sel.clear();PAGE_C=null;ctxSig=pipeSig();changed();renderStage();setTimeout(()=>{renderFloat();fitPage()},60);
+  const tot=r.pipes.reduce((a,o)=>a+pipeLen(o),0);
+  const m=modal(`<div class="mh"><div><h2>השרטוט מוכן</h2><p>שורטט רק מה שסימנת</p></div></div><div class="mb"><div class="vtot"><div><small>מקטעים</small><b>${r.pipes.length}</b></div><div><small>אורך כולל</small><b>${fmtM(tot,1)} מ'</b></div><div><small>שוחות ואביזרים</small><b>${r.items.length}</b></div></div>
+    ${r.untyped?`<div class="chk w" style="margin-top:10px"><b>${r.untyped} מקטעים מחכים לסוג צינור</b> – לא סימנת לידם כיתוב של קוטר. לוחצים על מקטע ובוחרים סוג; כל המקטעים מאותו סוג יודגשו בצהוב.</div>`:''}
+    ${r.infos?`<div style="font-size:13.5px;color:var(--muted2);margin-top:8px">${r.infos} כיתובים מסומנים שימשו לקוטר ולסוג.</div>`:''}</div><div class="mf"><button class="btn pri" data-x>אישור</button></div>`);
+  m.onclick=e=>{if(e.target.closest('[data-x]')){closeModal(m);if(r.untyped){const f=r.pipes.find(o=>!o.typeId);if(f){S.sel=new Set([f.id]);cardFor=f.id;renderStage();renderCard()}}}};
+  if(ch.others){const others=data.marks.filter(m=>!isFalPipe(m.color)&&!isFalItem(m.color));if(others.length){S.falSkip=false;FAL_OTHERS=true;await autoModal(region)}}}
+let FAL_OTHERS=false;
+
+/* marked routes → continuous pipes: strokes that touch are joined (also around corners), straightened, T-joints kept */
+function falRoutes(list,mh=[]){let runs=list.map(x=>dpSimplify(x.route,.12)).filter(r=>r.length>1&&polyLen(r)>.2);const tol=Math.max(.8,...list.map(x=>x.r*2.2));
+  const ends=r=>[r[0],r[r.length-1]];
+  const touches=(E,self)=>mh.some(m=>D(m,E)<Math.max(1.5,tol))||runs.some(q=>{if(q===self)return false;for(let i=1;i<q.length;i++){const pr=projSeg(E,q[i-1],q[i]);if(Math.hypot(E[0]-pr[0],E[1]-pr[1])<tol)return true}return false});
+  const join=()=>{let changed=true,guard=0;while(changed&&guard++<80){changed=false;outer:for(let i=0;i<runs.length;i++)for(let j=0;j<runs.length;j++){if(i===j)continue;const A=runs[i],B=runs[j];
+      for(const [ai,bj] of [[1,0],[1,1],[0,0],[0,1]]){const pa=ai?A[A.length-1]:A[0],pb=bj?B[B.length-1]:B[0];if(D(pa,pb)<tol){
+          if(mh.some(m=>D(m,pa)<Math.max(1.5,tol)))continue;   // a manhole ends the segment
+          const others=runs.filter((r,k)=>k!==i&&k!==j&&(D(r[0],pa)<tol||D(r[r.length-1],pa)<tol));if(others.length)continue;
+          /* a third route passing through this point (T) also keeps them apart */
+          const thru=runs.some((q,k)=>k!==i&&k!==j&&(()=>{for(let t=1;t<q.length;t++){const pr=projSeg(pa,q[t-1],q[t]);if(Math.hypot(pa[0]-pr[0],pa[1]-pr[1])<tol)return true}return false})());if(thru)continue;
+          const a2=ai?A:A.slice().reverse(),b2=bj?B.slice().reverse():B;const m=[(pa[0]+pb[0])/2,(pa[1]+pb[1])/2];runs[i]=dpSimplify([...a2.slice(0,-1),m,...b2.slice(1)],.12);runs.splice(j,1);changed=true;break outer}}}}};
+  join();
+  /* short loose stubs (a free end, under 1.5 m) are leftovers of where the marker crossed a line, not pipes */
+  for(let k=0;k<4;k++){const before=runs.length;runs=runs.filter(r=>{if(polyLen(r)>=1.5)return true;const [a,b]=ends(r);return touches(a,r)&&touches(b,r)});join();if(runs.length===before)break}
+  /* junctions closer than 1.5 m are one junction (no tiny piece of pipe between two branches) */
+  {const P=[];for(const r of runs)for(const k of [0,r.length-1])P.push({r,k,p:r[k]});const used=new Set();
+   for(const e of P){if(used.has(e))continue;const g=P.filter(q=>!used.has(q)&&D(q.p,e.p)<1.5);if(g.length<3)continue;g.forEach(q=>used.add(q));const c=[g.reduce((s,q)=>s+q.p[0],0)/g.length,g.reduce((s,q)=>s+q.p[1],0)/g.length];for(const q of g)q.r[q.k]=c.slice()}
+   runs=runs.filter(r=>polyLen(r)>.3);join()}
+  /* an end that stops on another route's middle joins it there; an end near a manhole goes to its centre */
+  for(const r of runs)for(const k of [0,r.length-1]){const E=r[k];const m=mh.find(m=>D(m,E)<Math.max(1.5,tol));if(m){r[k]=[m[0],m[1]];continue}let best=null,bd=tol;for(const q of runs){if(q===r)continue;for(let i=1;i<q.length;i++){const pr=projSeg(E,q[i-1],q[i]);const d=Math.hypot(E[0]-pr[0],E[1]-pr[1]);if(d<bd){bd=d;best=pr}}}if(best)r[k]=[best[0],best[1]]}
+  runs=runs.map(r=>dpSimplify(r,.2));
+  return {runs:runs.map(pts=>({pts,typeId:null})),manholes:findManholes([])}}
 
 /* =========================================================
    submission sheet (clean engineering page), PDF / DXF / Excel
@@ -4312,7 +4419,7 @@ async function uploadPlan(kind){
     pg.close();if(old&&old.blob!==plan.blob)DB.blobDel(old.blob).catch(()=>{});
     S.drawing.view=null;fitView({x0:0,y0:0,x1:plan.w*planK(plan),y1:plan.h*planK(plan)});changed();
     if(plan.kind==='pdf'){if(!plan.cad)await scaleModal(true,true);
-      if(info.marks)autoChoice();else layersModal()}
+      if(info.marks){const dd=await readPlanData();if(dd.marks.some(m=>isFalPipe(m.color)||isFalItem(m.color)))autoModal();else autoChoice()}else layersModal()}
     else{const k=await new Promise(res=>{const m=modal(`<div class="mh"><div><h2>מה בתמונה?</h2><p>כדי שהאורכים יהיו במטרים, מכיילים לפי קו אחד שהאורך שלו ידוע</p></div></div><div class="mb"><div class="opts">
         <button class="opt" data-k="sketch"><b>שרטוט יד על דף</b><span>אבנה רק את הצורה. אחר כך לוחצים על כל קו ועיגול ומגדירים סוג, קוטר ואורך</span></button><button class="opt" data-k="marked"><b>תוכנית מסומנת במרקר</b><span>אכייל ואז אזהה את צבעי המרקר</span></button><button class="opt" data-k="trace"><b>צנרת באתר / סקיצה</b><span>אכייל, ואז משרטטים עם העט מעל התמונה</span></button></div></div>`);m.onclick=e=>{const b=e.target.closest('[data-k]');if(b){closeModal(m);res(b.dataset.k)}}});
       if(k==='sketch'){const pg2=progress('בונה את הצורה מהשרטוט',['']);try{pushUndo();const r=await sketchFromPhoto((f,t)=>pg2.set(f,t));pg2.close();changed();renderStage();setTimeout(()=>{renderFloat();fitPage()},60);
