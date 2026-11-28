@@ -404,6 +404,24 @@ html[data-env=phone] #vw .hide-ph{display:none!important}
 @media (max-width:760px){.vcard2 .vsw{flex-wrap:nowrap!important;overflow-x:auto;scrollbar-width:none;padding:2px}.vcard2 .vsw::-webkit-scrollbar{display:none}.vcard2 .vsw .sw{flex:none}.vcard2.mini{width:calc(100vw - 20px)}}
 
 #wpage{pointer-events:none}#wpage [data-lab]{pointer-events:all;cursor:move}
+
+.lbtn{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;min-width:54px;height:50px;padding:2px 6px;font-size:11px;font-weight:600}
+.lbtn .i{width:19px;height:19px}.lbtn span{line-height:1.1;white-space:nowrap}
+html[data-env=phone] .lbtn{min-width:44px;height:46px;font-size:10px;padding:2px 3px}
+.gbusy{position:fixed;top:max(14px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);z-index:300;background:var(--navy);color:#E9E0CF;padding:9px 16px 9px 14px;border-radius:22px;font-size:14px;display:flex;align-items:center;gap:10px;box-shadow:0 8px 24px #0004;max-width:90vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gbusy::before{content:"";width:15px;height:15px;border:2.5px solid #BA9B5F;border-top-color:transparent;border-radius:50%;animation:spin .8s linear infinite;flex:none}
+.upbar{position:fixed;bottom:max(16px,env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);z-index:250;background:#BA9B5F;color:#132B23;border:0;border-radius:24px;padding:12px 20px;font-size:14.5px;font-weight:700;box-shadow:0 10px 26px #0004}
+html[data-env=phone] .top .savechip{display:none!important}
+
+/* layer screen */
+.llist{display:flex;flex-direction:column;gap:6px;max-height:min(62vh,640px);overflow:auto;padding-left:4px}
+.lrow{display:flex;align-items:center;gap:12px;padding:8px;border:1.5px solid var(--line);border-radius:12px;background:var(--card)}
+.lrow b{display:block;font-size:14.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.lrow small{font-size:12.5px;color:var(--muted)}
+.lrow[data-role=pipe]{border-color:#2563EB;background:#2563EB0D}.lrow[data-role=item]{border-color:#BA9B5F;background:#BA9B5F12}.lrow[data-role=ctx]{border-color:#94A3B8}.lrow[data-role=hide]{opacity:.62}
+.lsel{display:flex;flex-direction:column;gap:5px;flex:none;width:210px}.lsel select{height:36px;border-radius:9px;border:1.5px solid var(--line);background:var(--card);font-size:13.5px;padding:0 8px;color:var(--ink)}
+.lcount{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+.pickbar{position:fixed;top:78px;left:50%;transform:translateX(-50%);z-index:120;background:var(--navy);color:#E9E0CF;border-radius:14px;padding:8px 10px 8px 16px;display:flex;align-items:center;gap:10px;box-shadow:0 10px 26px #0004;font-size:14px;max-width:94vw}
+@media (max-width:640px){.lrow{flex-wrap:wrap}.lrow svg{width:90px;height:56px}.lsel{width:100%}}
 </style>
 </head>
 <body>
@@ -1330,7 +1348,7 @@ async function openPlanRuntime(plan){
 }
 /* pdf.js shares one worker: a new document must wait until the previous one has fully closed */
 let PDF_CLOSING=Promise.resolve();const pdfClose=doc=>{if(!doc)return;try{PDF_CLOSING=Promise.all([PDF_CLOSING,Promise.resolve(doc.destroy()).catch(()=>{})])}catch(e){}};
-function closePlanRuntime(){try{PL.task&&PL.task.cancel()}catch(e){}pdfClose(PL.doc);Object.assign(PL,{doc:null,page:null,vp:null,img:null,over:null,key:null,data:null,vec:null,vecW:null,vecC:null,vecPal:null,task:null,sharp:null})}
+function closePlanRuntime(){try{PL.task&&PL.task.cancel()}catch(e){}pdfClose(PL.doc);Object.assign(PL,{doc:null,page:null,vp:null,img:null,over:null,key:null,data:null,vec:null,vecW:null,vecC:null,vecPal:null,vecL:null,vecLay:null,cad:null,task:null,sharp:null})}
 
 /* draw background: fast overview immediately, sharp render after a short pause */
 function drawBg(canvas,view,opts={}){
@@ -1386,6 +1404,7 @@ async function readPlanData(){
   }
   /* marks drawn in FALILO's viewer (marker / pen) travel with the plan */
   for(const m of (S.drawing&&S.drawing.plan&&S.drawing.plan.marks)||[])data.marks.push({...m,pts:m.pts.map(q=>q.slice())});
+  if(PL.cad||(S.drawing&&S.drawing.plan&&S.drawing.plan.cad)){const c=PL.cad||await DB.blobGet(S.drawing.plan.cad);if(c){for(const t of c.texts||[])data.texts.push({s:t.s,x:t.x,y:t.y,w:t.h*t.s.length*.6,h:t.h,a:t.rot||0,src:'txt',lay:t.lay});PL.data=data;return data}}
   try{const tc=await PL.page.getTextContent();const T=vp.transform;
     for(const it of tc.items){const s=String(it.str||'').trim();if(!s)continue;const m=it.transform;
       const fs=Math.hypot(m[2],m[3])||Math.hypot(m[0],m[1]);const ang=Math.atan2(m[1],m[0]);
@@ -1398,15 +1417,18 @@ async function readPlanData(){
 
 /* vector line work of the plan (for nearby structure), in viewport pt */
 async function readVectors(onProg){
-  if(PL.vec)return PL.vec;if(!PL.page)return null;
+  if(PL.vec)return PL.vec;
+  /* a DWG/DXF plan: lines come straight from the drawing, with their real layers */
+  const pl=S.drawing&&S.drawing.plan;if(pl&&pl.cad){const c=await DB.blobGet(pl.cad);if(c){PL.vec=c.segs;PL.vecW=new Float32Array(c.segs.length/4).fill(.6);PL.vecC=c.cix;PL.vecPal=c.pal;PL.vecL=c.lix;PL.vecLay=c.names;PL.cad=c;return PL.vec}}
+  if(!PL.page)return null;
   const pdfjs=await getLib('pdf');const O=pdfjs.OPS;
   const ol=await PL.page.getOperatorList({annotationMode:pdfjs.AnnotationMode.DISABLE});
   const fn=ol.fnArray,ar=ol.argsArray;const VT=PL.vp.transform;
   const mul=(m,n)=>[m[0]*n[0]+m[2]*n[1],m[1]*n[0]+m[3]*n[1],m[0]*n[2]+m[2]*n[3],m[1]*n[2]+m[3]*n[3],m[0]*n[4]+m[2]*n[5]+m[4],m[1]*n[4]+m[3]*n[5]+m[5]];
   let ctm=VT.slice();const stack=[];let color='#000000';const cstack=[];let lw=1;const wstack=[];const pal=[],palIx=new Map();const cIx=c=>{let i=palIx.get(c);if(i==null){i=pal.length;pal.push(c);palIx.set(c,i)}return i};
-  let wid=new Float32Array(1<<18),cid=new Uint16Array(1<<18);
+  let wid=new Float32Array(1<<18),cid=new Uint16Array(1<<18),lid=new Uint16Array(1<<18);const lays=['ללא שכבה'],layIx=new Map();let curL=0;const lst=[];
   let segs=new Float32Array(1<<20),n=0;const pend=[];
-  const push=(x1,y1,x2,y2,w,c)=>{if(n+4>segs.length){const s2=new Float32Array(segs.length*2);s2.set(segs);segs=s2}const j=n>>2;if(j>=wid.length){const w2=new Float32Array(wid.length*2);w2.set(wid);wid=w2;const c2=new Uint16Array(cid.length*2);c2.set(cid);cid=c2}wid[j]=w;cid[j]=c;segs[n++]=x1;segs[n++]=y1;segs[n++]=x2;segs[n++]=y2};
+  const push=(x1,y1,x2,y2,w,c)=>{if(n+4>segs.length){const s2=new Float32Array(segs.length*2);s2.set(segs);segs=s2}const j=n>>2;if(j>=wid.length){const w2=new Float32Array(wid.length*2);w2.set(wid);wid=w2;const c2=new Uint16Array(cid.length*2);c2.set(cid);cid=c2;const l2=new Uint16Array(lid.length*2);l2.set(lid);lid=l2}wid[j]=w;cid[j]=c;lid[j]=curL;segs[n++]=x1;segs[n++]=y1;segs[n++]=x2;segs[n++]=y2};
   const tp=(x,y)=>[ctm[0]*x+ctm[2]*y+ctm[4],ctm[1]*x+ctm[3]*y+ctm[5]];
   const isWhite=c=>{const v=hex2rgb(c);return v[0]>235&&v[1]>235&&v[2]>235};
   let inAnn=0;let cx=0,cy=0,sx=0,sy=0,hasPt=false;
@@ -1419,6 +1441,10 @@ async function readVectors(onProg){
       case O.paintFormXObjectBegin:stack.push(ctm.slice());cstack.push(color);wstack.push(lw);if(a&&a[0])ctm=mul(ctm,a[0]);break;
       case O.paintFormXObjectEnd:if(stack.length){ctm=stack.pop();color=cstack.pop();lw=wstack.pop()}break;
       case O.setLineWidth:lw=a[0];break;
+      /* layers (AutoCAD keeps them in the PDF as optional content) */
+      case O.beginMarkedContentProps:{let li=curL;if(a&&a[0]==='OC'&&a[1]){const id=typeof a[1]==='string'?a[1]:(a[1].id||(a[1].ids&&a[1].ids[0]));if(id!=null){li=layIx.get(id);if(li==null){li=lays.length;lays.push(id);layIx.set(id,li)}}}lst.push(curL);curL=li;break}
+      case O.beginMarkedContent:lst.push(curL);break;
+      case O.endMarkedContent:curL=lst.length?lst.pop():0;break;
       case O.setStrokeRGBColor:case O.setStrokeColor:if(a&&typeof a[0]==='string')color=a[0];else if(a&&a.length>=3)color=toHex(a[0]*(a[0]<=1?255:1),a[1]*(a[1]<=1?255:1),a[2]*(a[2]<=1?255:1));break;
       case O.constructPath:{const ops=a[0],cs=a[1];let k=0;
         for(const op of ops){
@@ -1435,7 +1461,10 @@ async function readVectors(onProg){
     }
     if(onProg&&!(i%40000)){onProg(i/fn.length);await sleep(0)}
   }
-  PL.vec=segs.subarray(0,n);PL.vecW=wid.subarray(0,n>>2);PL.vecC=cid.subarray(0,n>>2);PL.vecPal=pal;return PL.vec;
+  PL.vec=segs.subarray(0,n);PL.vecW=wid.subarray(0,n>>2);PL.vecC=cid.subarray(0,n>>2);PL.vecPal=pal;PL.vecL=lid.subarray(0,n>>2);
+  /* layer ids → their names */
+  if(lays.length>1){try{const cfg=await PL.doc.getOptionalContentConfig();PL.vecLay=lays.map((id,i)=>{if(!i)return id;try{const g=cfg.getGroup(id);return (g&&g.name)||id}catch(e){return id}})}catch(e){PL.vecLay=lays}}else PL.vecLay=null;
+  return PL.vec;
 }
 
 /* ---------- automatic scale ---------- */
@@ -1452,6 +1481,8 @@ function detectScale(data){
 
 /* ---------- load a new plan file into the current drawing ---------- */
 async function importPlanFile(file,onStep){
+  if(/\.(dwg|dxf)$/i.test(file.name)){const r=await cadToPlan(file,onStep);const key='plan_'+uid(),ck='cad_'+uid();await DB.blobPut(key,r.pdf);await DB.blobPut(ck,r.data);
+    return {kind:'pdf',blob:key,name:file.name.replace(/\.(dwg|dxf)$/i,'.pdf'),src:file.name,page:1,w:r.w,h:r.h,N:r.N,cad:ck}}
   const isPdf=/pdf/i.test(file.type)||/\.pdf$/i.test(file.name);
   const key='plan_'+uid();await DB.blobPut(key,file);
   let plan;
@@ -2172,8 +2203,9 @@ function editorHTML(){return `
   <div style="display:flex;flex-direction:column;line-height:1.25;min-width:0;cursor:pointer" data-a="rename"><b id="edName" style="font-size:17px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></b><span id="edSub" style="font-size:13px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></span></div>
   <ol class="steps hide-ph" id="steps"></ol>
   <div class="sep"></div>
-  <button class="btn icon" data-a="undo" aria-label="ביטול">${ic('undo')}</button>
-  <button class="btn icon" data-a="redo" aria-label="חזרה">${ic('redo')}</button>
+  <button class="btn lbtn" data-a="undo" aria-label="אחורה">${ic('undo')}<span>אחורה</span></button>
+  <button class="btn lbtn" data-a="redo" aria-label="קדימה">${ic('redo')}<span>קדימה</span></button>
+  <button class="btn lbtn" data-a="savenow" aria-label="שמירה">${ic('check')}<span>שמירה</span></button>
   <button class="savechip hide-ph" data-a="savedlg"></button>
   <button class="btn icon" data-a="side" aria-label="כמויות ובדיקה">${ic('list')}</button>
   <button class="btn pri" data-a="sheet">${ic('dl')}<span class="hide-ph">הגשה</span></button>
@@ -2292,13 +2324,13 @@ function _render(bgOnly){
   renderOverlay();
 }
 /* the submission page drawn behind the work: what you see is what you send */
-let PAGE_C=null;_onChanged.push(()=>{PAGE_C=null});
-function renderPage(){const el=$('#wpage');if(!el)return;const d=S.drawing;if(!PREF.showPage||!d.objects.some(o=>o.t==='pipe'||o.t==='item')){if(el.innerHTML)el.innerHTML='';SV.classList.remove('paged');return}
+let PAGE_C=null;_onChanged.unshift(()=>{PAGE_C=null});   // first, so the redraw that follows uses the new page
+function renderPage(){const el=$('#wpage');if(!el)return;const d=S.drawing;if(!d.objects.some(o=>o.t==='pipe'||o.t==='item')){if(el.innerHTML)el.innerHTML='';SV.classList.remove('paged');return}const SHOW=!!PREF.showPage;
   if(PAGE_C&&el.dataset.k===PAGE_C)return;
-  try{const r=sheetSVG(d,S.project,{page:0,frameOnly:true,labelsOnly:true});const lay=r.lay;if(!lay){el.innerHTML='';return}const s=1000/lay.N;const bb=lay.bb;const cx=(bb.x0+bb.x1)/2,cy=(bb.y0+bb.y1)/2,acx=(lay.area.x0+lay.area.x1)/2,acy=(lay.area.y0+lay.area.y1)/2;
+  try{const r=sheetSVG(d,S.project,{page:0,frameOnly:true,labelsOnly:true,noFrame:!SHOW});if(SHEET_LAB_NEW){SHEET_LAB_NEW=false;scheduleSave()}const lay=r.lay;if(!lay){el.innerHTML='';return}const s=1000/lay.N;const bb=lay.bb;const cx=(bb.x0+bb.x1)/2,cy=(bb.y0+bb.y1)/2,acx=(lay.area.x0+lay.area.x1)/2,acy=(lay.area.y0+lay.area.y1)/2;
     const wx=cx-acx/s,wy=cy-acy/s,ww=lay.pw/s,wh=lay.ph/s;const inner=r.svg.replace(/^<svg[^>]*>/,'').replace(/<\/svg>$/,'');
-    el.innerHTML=`<rect x="${wx+ww*.004}" y="${wy+wh*.006}" width="${ww}" height="${wh}" fill="#00000014"/><rect x="${wx}" y="${wy}" width="${ww}" height="${wh}" fill="#fff"/><svg x="${wx}" y="${wy}" width="${ww}" height="${wh}" viewBox="0 0 ${lay.pw} ${lay.ph}" overflow="visible" style="direction:ltr">${inner}</svg>`;
-    PAGE_C=String(Date.now());el.dataset.k=PAGE_C;SV.classList.add('paged');PAGE_LAY={pk:lay.pk,N:lay.N,orient:lay.orient,box:[wx,wy,wx+ww,wy+wh]};renderFloat()}catch(e){console.warn('page',e);el.innerHTML=''}}
+    el.innerHTML=`${SHOW?`<rect x="${wx+ww*.004}" y="${wy+wh*.006}" width="${ww}" height="${wh}" fill="#00000014"/><rect x="${wx}" y="${wy}" width="${ww}" height="${wh}" fill="#fff"/>`:''}<svg x="${wx}" y="${wy}" width="${ww}" height="${wh}" viewBox="0 0 ${lay.pw} ${lay.ph}" overflow="visible" style="direction:ltr">${inner}</svg>`;
+    PAGE_C=String(Date.now());el.dataset.k=PAGE_C;SV.classList.toggle('paged',SHOW);PAGE_LAY={pk:lay.pk,N:lay.N,orient:lay.orient,box:[wx,wy,wx+ww,wy+wh]};renderFloat()}catch(e){console.warn('page',e);el.innerHTML=''}}
 let PAGE_LAY=null;
 function fitPage(){if(PAGE_LAY&&PREF.showPage){const b=PAGE_LAY.box;fitView({x0:b[0],y0:b[1],x1:b[2],y1:b[3]})}else fitView()}
 function renderOverlay(){
@@ -2314,7 +2346,7 @@ function renderOverlay(){
   if(d.ctx&&d.ctx.texts&&!d.ctxHidden&&!d.plan&&v.k>6)for(const t of d.ctx.texts){const p=toScr([t.x,t.y]);const fs=clamp(t.h*v.k,0,18);if(fs<7)continue;h+=`<text x="${p[0]}" y="${p[1]}" font-size="${fs}" fill="#64748B" text-anchor="middle" font-family="IBM Plex Mono" transform="rotate(${t.a*180/Math.PI} ${p[0]} ${p[1]})">${esc(t.s)}</text>`}
   for(const o of d.objects)if(o.t==='item'){const q=toScr([o.x,o.y]);placed.push({x0:q[0]-10,y0:q[1]-10,x1:q[0]+10,y1:q[1]+10})}
   // pipe labels (when the page is shown, labels come from the page itself – exactly as they will print, and they don't move with zoom)
-  const PAGED=PREF.showPage&&PAGE_LAY&&$('#wpage')&&$('#wpage').innerHTML;
+  const PAGED=PAGE_LAY&&$('#wpage')&&$('#wpage').innerHTML;
   for(const o of d.objects){if(PAGED)break;if(o.t!=='pipe'||!objShown(o))continue;const ed=objEditable(o);const t=pipeT(o.typeId);if(pipeLen(o)<0.05&&!S.sel.has(o.id))continue;const lab=pipeLabel(t,pipeLen(o));
     let best=-1,bl=0;for(let i=1;i<o.pts.length;i++){const l=D(o.pts[i-1],o.pts[i]);if(l>bl){bl=l;best=i}}if(best<0)continue;
     const a=toScr(o.pts[best-1]),b=toScr(o.pts[best]);const sl=Math.hypot(b[0]-a[0],b[1]-a[1]);const fs=clamp(v.k*.32,8.5,12)*(S.env==='desktop'?1:1.1);const lw=lab.length*fs*.6+12;
@@ -2383,7 +2415,7 @@ function bindStage(){
   SV.addEventListener('pointerdown',onDown);SV.addEventListener('pointermove',onMove);SV.addEventListener('pointerup',onUp);SV.addEventListener('pointercancel',onUp);
   SV.addEventListener('wheel',e=>{e.preventDefault();const r=STG.getBoundingClientRect();if(e.ctrlKey||Math.abs(e.deltaY)>=40||e.deltaMode)zoomAt(Math.exp(-e.deltaY*(e.ctrlKey?.012:.0016)),e.clientX-r.left,e.clientY-r.top);else{S.view.x+=e.deltaX/S.view.k;S.view.y+=e.deltaY/S.view.k;renderStage()}},{passive:false});
   SV.addEventListener('dblclick',e=>{if(S.tool==='pipe'&&clickPts){finishClickPipe();e.preventDefault()}});
-  SV.addEventListener('contextmenu',e=>{e.preventDefault();const r=STG.getBoundingClientRect();const h=hitObj(e.clientX-r.left,e.clientY-r.top);if(h&&h.id){S.sel=new Set([h.id]);cardFor=h.id;renderStage();renderCard()}});
+  SV.addEventListener('contextmenu',e=>{e.preventDefault();if(S.tool!=='select'&&S.tool!=='boxsel'){if(clickPts&&clickPts.length>1)finishClickPipe();clickPts=null;tmp=null;setTool('select');hint('חזרה לבחירה והזזה');return}const r=STG.getBoundingClientRect();const h=hitObj(e.clientX-r.left,e.clientY-r.top);if(h&&h.id){S.sel=new Set([h.id]);cardFor=h.id;renderStage();renderCard()}});
   new ResizeObserver(()=>renderStage()).observe(STG);
 }
 function ptOf(e){const r=STG.getBoundingClientRect();return [e.clientX-r.left,e.clientY-r.top]}
@@ -2393,7 +2425,7 @@ let lpT=null;
 function labDown(e,p){const lb=e.target.closest&&e.target.closest('#wpage [data-lab]');if(!lb||S.tool!=='select'||!PAGE_LAY)return false;const key=lb.dataset.lab;const d=S.drawing;d.labels=d.labels||{};const o=d.labels[key]||{};pushUndo();
   dragging={k:'lab',key,el:lb,start:p,o:{dx:o.dx||0,dy:o.dy||0},mm:PAGE_LAY.N/1000*S.view.k,moved:false};return true}
 function onDown(e){
-  const p=ptOf(e);PTR.set(e.pointerId,{p,t:e.pointerType});try{SV.setPointerCapture(e.pointerId)}catch(_){}
+  const p=ptOf(e);if(e.isPrimary&&PTR.size){PTR.clear();if(gesture&&gesture.k==='pinch')gesture=null}PTR.set(e.pointerId,{p,t:e.pointerType});try{SV.setPointerCapture(e.pointerId)}catch(_){}
   if(e.pointerType==='pen')lastPen=Date.now();
   if(e.pointerType==='touch'&&S.env==='pen'&&Date.now()-lastPen<600)return;                      // palm rejection
   // long-press (finger or pen) on anything → select it and open its card, whatever tool is active
@@ -2401,6 +2433,7 @@ function onDown(e){
     if(h0.id){S.sel=new Set([h0.id]);cardFor=h0.id}else{S.sel.clear();cardFor='room:'+h0.room}if(navigator.vibrate)navigator.vibrate(15);renderStage();renderCard()},550)}}
   if(PTR.size===2&&[...PTR.values()].every(q=>q.t==='touch')){tmp=null;dragging=null;startPinch();return}
   if(labDown(e,p))return;
+  if(S.pickLayers&&e.button===0&&isDrawPtr(e)){layerPickAt(toW(...p));return}
   const pan=e.button===1||e.button===2||S.tool==='hand'||spaceDown||(e.pointerType==='touch'&&S.env==='pen')||(e.pointerType==='touch'&&S.tool==='select'&&!hitObj(...p));
   if(pan){gesture={k:'pan',p,v:{...S.view},moved:false};return}
   if(!isDrawPtr(e))return;
@@ -2536,7 +2569,7 @@ async function placeAt(w,p){
     mut(()=>{const o={id:uid(),t:'item',itemId:it.id,x:sn?sn.p[0]:w[0],y:sn?sn.p[1]:w[1],ok:true};if(it.riser){const rt=riserTypeFor(pipeT(sn?sn.o.typeId:S.typeId));o.typeId=rt?rt.id:(sn?sn.o.typeId:S.typeId)}objs().push(o);
       if(it.sym==='trap'&&sn){const red=reducerFor(pipeT(sn.o.typeId));if(red){objs().push({id:uid(),t:'item',itemId:red.id,x:o.x,y:o.y,ok:true});toast('נוסף מעבר ל-110 (המחסום על צינור גדול יותר)')}}});return}
   if(S.tool==='text'){const s=await promptModal('טקסט על השרטוט','',{ph:'כותבים בעברית או באנגלית'});if(s){const id=uid();mut(()=>objs().push({id,t:'text',x:w[0],y:w[1],s,size:3.5}));setTool('select');S.sel=new Set([id]);cardFor=id;renderStage();renderCard()}return}
-  if(S.tool==='photo'){const f=await pickFile('image/*',true);if(!f)return;const key='ph_'+uid();const small=await shrinkImage(f,1800);await DB.blobPut(key,small);
+  if(S.tool==='photo'){const f=await pickFile('image/*');if(!f)return;const key='ph_'+uid();const small=await shrinkImage(f,1800);await DB.blobPut(key,small);
     const n=objs().filter(o=>o.t==='photo').reduce((m,o)=>Math.max(m,o.n||0),0)+1;const cap=await promptModal('כיתוב לתמונה',`תמונה ${n}`);
     mut(()=>objs().push({id:uid(),t:'photo',x:w[0],y:w[1],blob:key,n,cap:cap||`תמונה ${n}`,show:true,date:todayStr()}));setTool('select');return}
 }
@@ -2669,6 +2702,7 @@ async function onEdClick(e){
     case 'rename':{const v=await promptModal('שם החשבון / הגיליון',S.drawing.name);if(v)mut(()=>{S.drawing.name=v});const f=await promptModal('קומה / אזור (לא חובה)',S.drawing.floor||'');if(f!==null)mut(()=>{S.drawing.floor=f});break}
     case 'scale':scaleModal();break;
     case 'pagetoggle':pageMenu();break;
+    case 'savenow':{await flushSave();toast(SAVE.state==='err'?'השמירה נכשלה: '+SAVE.err:'נשמר ✓ '+(SAVE.drive?'במכשיר וב-Google Drive':'במכשיר'));break}
     case 'plantoggle':{const d=S.drawing;d.layers=d.layers||{};const st=d.layers.plan||{};d.layers.plan={...st,hidden:!st.hidden};PL.sharp=null;renderFloat();renderSide();renderStage();scheduleSave();break}
     case 'bgalpha':{const opts=[0,.15,.32,.5,.8];const cur=S.drawing.bgAlpha??.32;S.drawing.bgAlpha=opts[(opts.indexOf(cur)+1)%opts.length];S.drawing.hideBg=S.drawing.bgAlpha===0;PL.sharp=null;renderFloat();renderStage();scheduleSave();break}
     case 'newtype':typeModal(null);break;case 'newitem':addToLibrary();break;
@@ -2701,7 +2735,7 @@ async function onEdClick(e){
 }
 
 /* ---------- auto-draw flow ---------- */
-async function regionAuto(r){if(!S.drawing.plan){toast('קודם מעלים תוכנית');return}setTool('select');if(S.regionFor==='all'){S.regionFor=null;await drawAllModal(r);return}await autoModal(r)}
+async function regionAuto(r){if(!S.drawing.plan){toast('קודם מעלים תוכנית');return}setTool('select');if(S.regionFor==='all'){S.regionFor=null;await layersModal(r);return}if(S.regionFor==='layers'){S.regionFor=null;const f=LAYCB;LAYCB=null;if(f)f(r);return}await autoModal(r)}
 async function autoModal(region){
   const d=S.drawing;if(!d.plan){startModal();return}
   if(d.plan.kind==='pdf'&&!d.plan.N){const ok=await scaleModal(true);if(!ok)return}
@@ -2755,8 +2789,8 @@ async function autoChoice(){const d=S.drawing;if(!d.plan){startModal();return}if
   const data=await readPlanData();const has=data.marks.length>0;
   const m=modal(`<div class="mh"><div><h2>שרטוט אוטומטי</h2><p>מה לשרטט מהתוכנית?</p></div></div><div class="mb"><div class="opts">
     <button class="opt" data-k="marks" ${has?'':'disabled style="opacity:.45"'}><b>מה שסימנתי במרקר</b><span>${has?`נמצאו ${data.marks.length} סימונים`:'אין סימונים בקובץ'}</span></button>
-    <button class="opt" data-k="all"><b>כל הצנרת בתוכנית</b><span>בלי סימון · בוחרים אילו קווים הם צנרת, ואפשר להגביל לאזור</span></button></div></div><div class="mf"><button class="btn ghost" data-x>ביטול</button></div>`);
-  m.onclick=ev=>{const b=ev.target.closest('[data-k]');if(b&&!b.disabled){closeModal(m);b.dataset.k==='all'?drawAllModal():autoModal()}if(ev.target.closest('[data-x]'))closeModal(m)}}
+    <button class="opt" data-k="all"><b>לפי שכבות / סוגי קווים</b><span>בלי סימון · בוחרים לכל שכבה מה היא (צנרת, שוחות, מבנה), ואפשר לגזור אזור</span></button></div></div><div class="mf"><button class="btn ghost" data-x>ביטול</button></div>`);
+  m.onclick=ev=>{const b=ev.target.closest('[data-k]');if(b&&!b.disabled){closeModal(m);b.dataset.k==='all'?layersModal():autoModal()}if(ev.target.closest('[data-x]'))closeModal(m)}}
 async function drawAllModal(region){const d=S.drawing;if(!d.plan||d.plan.kind!=='pdf'){toast('צריך תוכנית PDF');return}
   if(!d.plan.N){const ok=await scaleModal(true);if(!ok)return}
   const pg=progress('מחפש את קווי הצנרת בתוכנית',['']);let res;try{res=await pipeStyles((f,t)=>pg.set(f,t))}catch(err){pg.close();toast(err.message);return}pg.close();
@@ -2801,9 +2835,155 @@ function pageMenu(){const d=S.drawing;const L=PAGE_LAY||{};const has=d.objects.s
     if(t.closest('[data-pfit]'))apply(()=>{SH.paper='auto';SH.orient='auto';SH.N=null})};
   $('#pgShow',m).onchange=ev=>{PREF.showPage=ev.target.checked;savePref();PAGE_C=null;renderStage();setTimeout(()=>{renderFloat();fitPage()},40)}}
 
+window.addEventListener('blur',()=>{PTR.clear();if(gesture&&gesture.k==='pinch')gesture=null});
+
+/* =========================================================
+   drawing from layers: every PDF/DWG layer (or, in a flat PDF, every line style)
+   gets a role – pipe (of a type), manholes/fittings, building background, or hidden.
+   Optional crop area. Pick-by-example for flat PDFs.
+   ========================================================= */
+let LAYCB=null;
+const LROLE={hide:'להסתיר',pipe:'צנרת',item:'שוחות / אביזרים',ctx:'מבנה ברקע'};
+function layDisp(n){let s=cadText(String(n||''));if(s.includes('|'))s=s.split('|').pop();return s.replace(/\$0\$/g,' · ')}
+function layGuess(name){const n=String(name).toLowerCase();
+  if(/(txt|text|name|names|dim|anno|hatch|patt|grid|axis|symb|arrow|title|ttl|frame|viewport|defpoints|no-plot|hidn|hidden|fixt|cntr|center|centre|-il$|-il[^a-z]|level|slope)/.test(n))return 'hide';
+  if(/man[- ]?hole|manholes|shuh|שוח|chamber|(^|[^a-z])mh([^a-z]|$)|-man([^a-z]|$)/.test(n))return 'item';
+  if(/p-pipe|pipe|sewer|biyuv|ביוב|ניקוז|nikuz|drainage ?layout|drainagelayout|water|מים|plumb|ww-|ss-|ביו/.test(n))return 'pipe';
+  if(/wall|kir|קיר|door|delet|petah|פתח|window|glass|cons|beton|column|amud|stair|madreg|building|mivne|floor|room|alum|curb|road|kvish|landscape/.test(n))return 'ctx';
+  return 'hide'}
+/* groups = layers (or line styles when the PDF has no layers) */
+async function layerGroups(){const pg=progress('קורא את שכבות התוכנית',['']);let vec;try{vec=await readVectors(p=>pg.set(.05+p*.85,'קורא את קווי התוכנית'))}catch(e){pg.close();toast(e.message);return null}pg.close();if(!vec)return null;
+  const kM=planK(S.drawing.plan);const W=PL.vecW,C=PL.vecC,pal=PL.vecPal,LI=PL.vecL;const useLay=!!(PL.vecLay&&PL.vecLay.length>1);const map=new Map();
+  for(let i=0,j=0;i<vec.length;i+=4,j++){const col=String(pal[C[j]]||'');if(col.startsWith('fill:'))continue;const L=Math.hypot(vec[i+2]-vec[i],vec[i+3]-vec[i+1]);if(L<.3)continue;
+    const key=useLay?'L'+LI[j]:'S'+C[j]+'|'+W[j].toFixed(2);let e=map.get(key);if(!e){e={key,name:useLay?PL.vecLay[LI[j]]:col,color:col,w:W[j],len:0,n:0,idx:[],cols:{},ins:0,txt:0};map.set(key,e)}
+    e.len+=L;e.n++;e.cols[col]=(e.cols[col]||0)+L;if(e.idx.length<6000)e.idx.push(i)}
+  if(PL.cad){for(const q of PL.cad.inserts||[]){const li=PL.vecLay.indexOf(q.lay);const key='L'+li;let e=map.get(key);if(!e){e={key,name:q.lay,color:'#334155',w:1,len:0,n:0,idx:[],cols:{},ins:0,txt:0};map.set(key,e)}e.ins++}
+    for(const t of PL.cad.texts||[]){const e=map.get('L'+PL.vecLay.indexOf(t.lay));if(e)e.txt++}}
+  const list=[...map.values()].map(e=>{const dom=Object.entries(e.cols).sort((a,b)=>b[1]-a[1])[0];return {...e,color:dom?dom[0]:e.color,lenM:e.len*kM}}).filter(e=>e.n>=2||e.ins);
+  return {useLay,list,vec,kM}}
+function styleName(e){const c=String(e.color);const [r,g,b]=/^#/.test(c)?hex2rgb(c):[0,0,0];const mx=Math.max(r,g,b),mn=Math.min(r,g,b);
+  const hue=mx===mn?null:(()=>{let h=mx===r?(g-b)/(mx-mn):mx===g?2+(b-r)/(mx-mn):4+(r-g)/(mx-mn);h*=60;return h<0?h+360:h})();
+  const nm=hue==null||mx-mn<30?(mx<70?'שחור':mx>200?'אפור בהיר':'אפור'):hue<20||hue>=335?'אדום':hue<45?'כתום':hue<70?'צהוב':hue<165?'ירוק':hue<200?'טורקיז':hue<255?'כחול':hue<290?'סגול':'ורוד';
+  return `קו ${nm} · עובי ${(+e.w).toFixed(1)}`}
+
+async function layersModal(region){const d=S.drawing;if(!d.plan||d.plan.kind!=='pdf'){toast('צריך תוכנית PDF או DWG');return}
+  const G=await layerGroups();if(!G)return;const {useLay,list,vec}=G;if(!list.length){toast('לא נמצאו קווים בתוכנית');return}
+  const mem=S.project.layerMem=S.project.layerMem||{};const memKey=e=>useLay?'L:'+e.name:'S:'+e.color+'|'+(+e.w).toFixed(1);
+  const st=LAYST&&LAYST.plan===d.plan.blob?LAYST.roles:{};
+  for(const e of list){const m=st[e.key]||mem[memKey(e)];e.role=m?m.role:(useLay?layGuess(e.name):'hide');e.typeId=m&&m.typeId||'';e.itemId=m&&m.itemId||''}
+  const order={pipe:0,item:1,ctx:2,hide:3};list.sort((a,b)=>(order[a.role]-order[b.role])||(b.lenM+b.ins*5)-(a.lenM+a.ins*5));
+  const L=lib();const pipeOpts=`<option value="">קוטר וסוג לפי הכיתוב בתוכנית</option>${L.pipes.map(p=>`<option value="${p.id}">${esc((p.mat?p.mat+' ':'')+p.dia)}</option>`).join('')}`;
+  const itemOpts=`<option value="">זיהוי אוטומטי (ניקוז/ביוב, מידה)</option>${L.items.filter(i=>!i.riser).map(i=>`<option value="${i.id}">${esc(itemFull(i))}</option>`).join('')}`;
+  const row=e=>`<div class="lrow" data-lk="${esc(e.key)}">${styleThumb(e,vec,120,74)}<div class="grow" style="min-width:0"><b title="${esc(e.name)}">${useLay?esc(layDisp(e.name)):esc(styleName(e))}</b><small>${e.lenM>=1?fmtM(e.lenM,0)+' מ\' קווים':''}${e.ins?` · ${e.ins} בלוקים`:''}${e.txt?` · ${e.txt} טקסטים`:''}</small></div>
+    <div class="lsel"><select data-role>${Object.entries(LROLE).map(([k,n])=>`<option value="${k}" ${e.role===k?'selected':''}>${n}</option>`).join('')}</select>
+    <select data-type class="${e.role==='pipe'?'':'hide'}">${pipeOpts.replace(`value="${e.typeId}"`,`value="${e.typeId}" selected`)}</select>
+    <select data-item class="${e.role==='item'?'':'hide'}">${itemOpts.replace(`value="${e.itemId}"`,`value="${e.itemId}" selected`)}</select></div></div>`;
+  const m=modal(`<div class="mh"><div><h2>${useLay?'שכבות התוכנית':'סוגי הקווים בתוכנית'}</h2><p>${useLay?`נמצאו ${list.length} שכבות. לכל שכבה בוחרים מה היא – והשרטוט נבנה רק ממה שבחרת.`:'בתוכנית הזאת אין שכבות, אז מוצגים סוגי הקווים (צבע ועובי). אפשר גם לגעת בקו צנרת בתוכנית ולבחור "לפי דוגמה".'}</p></div></div>
+    <div class="mb"><div class="row" style="gap:8px;margin-bottom:10px;flex-wrap:wrap"><input class="f grow" id="lq" placeholder="חיפוש שכבה" style="min-width:160px"><button class="btn sm" data-lall="hide">הכול: להסתיר</button><button class="btn sm" data-pick>${ic('select')}בחירה לפי דוגמה</button></div>
+    <div class="lcount" id="lcnt"></div><div class="llist">${list.map(row).join('')}</div></div>
+    <div class="mf"><button class="btn pri" data-ok>${ic('brain')}לשרטט</button><label class="row" style="gap:6px;font-size:14px"><input type="checkbox" id="lreg" ${region?'checked disabled':''} style="width:20px;height:20px">${region?'באזור שסימנת':'רק באזור שאסמן (גזירה)'}</label><div class="sep"></div><button class="btn ghost" data-x>ביטול</button></div>`,'wide');
+  const save=()=>{const roles={};for(const e of list)roles[e.key]={role:e.role,typeId:e.typeId,itemId:e.itemId};LAYST={plan:d.plan.blob,roles}};
+  const count=()=>{const c={pipe:0,item:0,ctx:0};let pm=0;for(const e of list){if(e.role!=='hide')c[e.role]++;if(e.role==='pipe')pm+=e.lenM}$('#lcnt',m).innerHTML=`<span class="pill ${c.pipe?'ok':'wk'}">${c.pipe} צנרת${pm?' · '+fmtM(pm,0)+' מ\'':''}</span> <span class="pill mu">${c.item} שוחות/אביזרים</span> <span class="pill mu">${c.ctx} מבנה</span>`};count();
+  m.onchange=ev=>{const r=ev.target.closest('.lrow');if(!r)return;const e=list.find(x=>x.key===r.dataset.lk);if(!e)return;
+    if(ev.target.matches('[data-role]')){e.role=ev.target.value;$('[data-type]',r).classList.toggle('hide',e.role!=='pipe');$('[data-item]',r).classList.toggle('hide',e.role!=='item');r.dataset.role=e.role}
+    if(ev.target.matches('[data-type]'))e.typeId=ev.target.value;if(ev.target.matches('[data-item]'))e.itemId=ev.target.value;count();save()};
+  list.forEach(e=>{const r=m.querySelector(`.lrow[data-lk="${CSS.escape(e.key)}"]`);if(r)r.dataset.role=e.role});
+  $('#lq',m).oninput=ev=>{const q=ev.target.value.trim().toLowerCase();$$('.lrow',m).forEach(r=>{const e=list.find(x=>x.key===r.dataset.lk);r.style.display=!q||String(e.name).toLowerCase().includes(q)||layDisp(e.name).toLowerCase().includes(q)?'':'none'})};
+  m.onclick=async ev=>{if(ev.target.closest('[data-x]')){save();closeModal(m);return}
+    const la=ev.target.closest('[data-lall]');if(la){for(const e of list){e.role='hide'}$$('[data-role]',m).forEach(s=>{s.value='hide';s.dispatchEvent(new Event('change',{bubbles:true}))});return}
+    if(ev.target.closest('[data-pick]')){save();closeModal(m);layerPickStart(G);return}
+    if(ev.target.closest('[data-ok]')){if(!list.some(e=>e.role==='pipe'||e.role==='item')){toast('בוחרים לפחות שכבה אחת של צנרת או שוחות');return}save();
+      for(const e of list){const k=memKey(e);if(e.role!=='hide'||mem[k])mem[k]={role:e.role,typeId:e.typeId,itemId:e.itemId}}
+      closeModal(m);const run=r=>layersDraw(G,list,r);
+      if(!region&&$('#lreg',m).checked){LAYCB=run;S.regionFor='layers';setTool('region');hint('מסמנים מלבן סביב האזור שממנו לשרטט');toast('גוררים מלבן על התוכנית סביב האזור');return}
+      run(region||null)}}}
+let LAYST=null;
+
+/* pick by example: tap a line on the plan → its layer/style becomes "pipe" */
+function layerPickStart(G){S.pickLayers=G;setTool('select');hint('נוגעים בקו צנרת בתוכנית · אפשר כמה פעמים · בסוף לוחצים "סיום"');
+  const b=document.createElement('div');b.className='pickbar';b.innerHTML=`<span id="pkTxt">נוגעים בקו צנרת בתוכנית</span><button class="btn sm pri" data-pkdone>סיום</button><button class="btn sm" data-pkx>ביטול</button>`;document.body.appendChild(b);
+  b.onclick=e=>{if(e.target.closest('[data-pkdone]')||e.target.closest('[data-pkx]')){b.remove();S.pickLayers=null;hint('');const ph=$('#pickhl');if(ph)ph.remove();$('#ov')&&renderStage();layersModal()}}}
+function layerPickAt(w){const G=S.pickLayers;if(!G)return false;const kM=planK(S.drawing.plan);const p=[w[0]/kM,w[1]/kM];const vec=G.vec,W=PL.vecW,C=PL.vecC,LI=PL.vecL;const tol=14/S.view.k/kM;let best=-1,bd=tol;
+  for(let i=0,j=0;i<vec.length;i+=4,j++){const x1=vec[i],y1=vec[i+1],x2=vec[i+2],y2=vec[i+3];if(Math.max(x1,x2)<p[0]-tol||Math.min(x1,x2)>p[0]+tol||Math.max(y1,y2)<p[1]-tol||Math.min(y1,y2)>p[1]+tol)continue;const dd=distSeg(p,[x1,y1],[x2,y2]);if(dd<bd){bd=dd;best=j}}
+  if(best<0){toast('לא נמצא קו במקום הזה – נוגעים בדיוק על הקו');return true}
+  const key=G.useLay?'L'+LI[best]:'S'+C[best]+'|'+W[best].toFixed(2);const e=G.list.find(x=>x.key===key);if(!e){toast('הקו הזה קצר מדי');return true}
+  LAYST=LAYST&&LAYST.plan===S.drawing.plan.blob?LAYST:{plan:S.drawing.plan.blob,roles:{}};LAYST.roles[key]={role:'pipe',typeId:(LAYST.roles[key]||{}).typeId||'',itemId:''};
+  /* show what was picked */
+  let dpath='';let c=0;for(const i of e.idx){dpath+=`M${(vec[i]*kM).toFixed(2)} ${(vec[i+1]*kM).toFixed(2)}L${(vec[i+2]*kM).toFixed(2)} ${(vec[i+3]*kM).toFixed(2)}`;if(++c>6000)break}
+  let hl=$('#pickhl');if(!hl){hl=document.createElementNS('http://www.w3.org/2000/svg','g');hl.id='pickhl';$('#wroot').appendChild(hl)}hl.insertAdjacentHTML('beforeend',`<path d="${dpath}" stroke="#F59E0B" stroke-opacity=".75" stroke-width="${3/S.view.k}" fill="none"/>`);
+  const t=$('#pkTxt');if(t)t.textContent=`נבחר: ${G.useLay?layDisp(e.name):styleName(e)} · ${fmtM(e.lenM,0)} מ'`;return true}
+
+/* ---------- build the drawing from the chosen layers ---------- */
+function chainSegs(raw,tol){const key=(x,y)=>Math.round(x/tol)+','+Math.round(y/tol);const node=new Map();const edges=[];const seen=new Set();
+  for(const s of raw){const a=key(s[0],s[1]),b=key(s[2],s[3]);if(a===b)continue;const ek=a<b?a+'|'+b:b+'|'+a;if(seen.has(ek))continue;seen.add(ek);const id=edges.length;edges.push({a,b,pa:[s[0],s[1]],pb:[s[2],s[3]]});for(const k of [a,b]){let L=node.get(k);if(!L){L=[];node.set(k,L)}L.push(id)}}
+  const used=new Uint8Array(edges.length);const out=[];const walk=(start,eid)=>{const pts=[];let cur=start,e=eid;const first=edges[e];pts.push(first.a===cur?first.pa:first.pb);
+    while(e!=null&&!used[e]){used[e]=1;const E=edges[e];const nx=E.a===cur?E.b:E.a;pts.push(E.a===cur?E.pb:E.pa);cur=nx;const L=node.get(cur);if(L.length!==2){e=null;break}e=L[0]===e?L[1]:L[0];if(used[e])break}return pts};
+  for(const [k,L] of node)if(L.length!==2)for(const e of L)if(!used[e])out.push(walk(k,e));
+  for(let e=0;e<edges.length;e++)if(!used[e])out.push(walk(edges[e].a,e));return out}
+function simplifyRun(pts,tolAng=.05){if(pts.length<3)return pts;const o=[pts[0]];for(let i=1;i<pts.length-1;i++){const a=o[o.length-1],b=pts[i],c=pts[i+1];const v1=[b[0]-a[0],b[1]-a[1]],v2=[c[0]-b[0],c[1]-b[1]];const l1=Math.hypot(...v1),l2=Math.hypot(...v2);if(!l1)continue;if(l2&&Math.abs(v1[0]*v2[1]-v1[1]*v2[0])/(l1*l2)<tolAng&&v1[0]*v2[0]+v1[1]*v2[1]>0)continue;o.push(b)}o.push(pts[pts.length-1]);return o}
+/* dashed lines: join runs whose ends line up across a short gap */
+function bridgeRuns(runs,gap){let changed=true,guard=0;while(changed&&guard++<6){changed=false;const G=new Grid(Math.max(gap,1e-6));const ends=[];runs.forEach((r,ri)=>{if(!r)return;for(const at of [0,1]){const p=at?r[r.length-1]:r[0],q=at?r[r.length-2]:r[1];const dir=[p[0]-q[0],p[1]-q[1]];const L=Math.hypot(...dir)||1;ends.push({ri,at,p,dir:[dir[0]/L,dir[1]/L]});G.addBox(p[0]-gap,p[1]-gap,p[0]+gap,p[1]+gap,ends.length-1)}});
+    const done=new Set();for(let i=0;i<ends.length;i++){const A=ends[i];if(done.has(A.ri)||!runs[A.ri])continue;let best=null,bd=gap;for(const j of G.query(A.p[0],A.p[1],A.p[0],A.p[1])){const B=ends[j];if(B.ri===A.ri||done.has(B.ri)||!runs[B.ri])continue;const dd=D(A.p,B.p);if(dd>=bd||dd<1e-9&&false)continue;
+        if(A.dir[0]*B.dir[0]+A.dir[1]*B.dir[1]>-.985)continue;const g=[B.p[0]-A.p[0],B.p[1]-A.p[1]];const gl=Math.hypot(...g);if(gl>1e-9&&(g[0]*A.dir[0]+g[1]*A.dir[1])/gl<.985)continue;bd=dd;best=B}
+      if(best){const ra=runs[A.ri],rb=runs[best.ri];const a2=A.at?ra:ra.slice().reverse(),b2=best.at?rb.slice().reverse():rb;runs[A.ri]=simplifyRun([...a2,...b2]);runs[best.ri]=null;done.add(A.ri);done.add(best.ri);changed=true}}
+    runs=runs.filter(Boolean)}return runs}
+/* drop the second line of a pipe drawn as two parallel lines */
+function dedupeParallel(runs,dist){const segs=[];runs.forEach((r,ri)=>{for(let i=1;i<r.length;i++)segs.push({ri,a:r[i-1],b:r[i]})});const G=new Grid(Math.max(dist*4,1e-6));segs.forEach((s,si)=>G.addBox(Math.min(s.a[0],s.b[0])-dist,Math.min(s.a[1],s.b[1])-dist,Math.max(s.a[0],s.b[0])+dist,Math.max(s.a[1],s.b[1])+dist,si));
+  const len=runs.map(polyLen);const drop=new Set();const order=runs.map((_,i)=>i).sort((a,b)=>len[a]-len[b]);
+  for(const ri of order){const r=runs[ri];let near=0,tot=0;for(let i=1;i<r.length;i++){const a=r[i-1],b=r[i];const L=D(a,b);tot+=L;const m=[(a[0]+b[0])/2,(a[1]+b[1])/2];let hit=false;for(const sj of G.query(m[0],m[1],m[0],m[1])){const s=segs[sj];if(s.ri===ri||drop.has(s.ri)||len[s.ri]<len[ri])continue;if(distSeg(m,s.a,s.b)<dist){const v1=[b[0]-a[0],b[1]-a[1]],v2=[s.b[0]-s.a[0],s.b[1]-s.a[1]];const c=Math.abs(v1[0]*v2[0]+v1[1]*v2[1])/((Math.hypot(...v1)*Math.hypot(...v2))||1);if(c>.97){hit=true;break}}}if(hit)near+=L}
+    if(tot&&near/tot>.8)drop.add(ri)}return runs.filter((_,i)=>!drop.has(i))}
+function manholeFor(text,choiceId){const L=lib();if(choiceId){const it=L.items.find(i=>i.id===choiceId);if(it)return it}
+  const t=String(text||'');const sewer=/ביוב|sew|biyuv|שופכין|ss/i.test(t);const base=L.items.find(i=>!i.baseName&&i.sym==='manhole'&&(sewer?/ביוב/.test(i.name):/ניקוז/.test(i.name)))||L.items.find(i=>i.sym==='manhole');if(!base)return null;
+  const sq=t.match(/(\d{2,3})\s*[\/x×X\*]\s*(\d{2,3})/);const rd=t.match(/[Øø⌀]\s*(\d{2,3})|(?:^|\D)(\d{2,3})(?:\s*ס"?מ)/);
+  if(sq)return itemVariant(base,'square',`${sq[1]}×${sq[2]}`);if(rd)return itemVariant(base,'round','Ø'+(rd[1]||rd[2]));return base}
+async function layersDraw(G,list,region){const d=S.drawing;const plan=d.plan;const kM=planK(plan);const vec=G.vec,W=PL.vecW,C=PL.vecC,LI=PL.vecL;const roles=new Map(list.map(e=>[e.key,e]));
+  const pg=progress('משרטט לפי השכבות שבחרת',['אוסף קווים','מחבר לצינורות רציפים','שוחות ואביזרים','מבנה ברקע','מסיים']);await sleep(30);
+  try{const inR=(x,y)=>!region||(x*kM>=region.x0&&x*kM<=region.x1&&y*kM>=region.y0&&y*kM<=region.y1);
+    const byKey=new Map();const ctxRaw=[];
+    for(let i=0,j=0;i<vec.length;i+=4,j++){const key=G.useLay?'L'+LI[j]:'S'+C[j]+'|'+W[j].toFixed(2);const e=roles.get(key);if(!e||e.role==='hide')continue;const ax=vec[i],ay=vec[i+1],bx=vec[i+2],by=vec[i+3];if(!inR((ax+bx)/2,(ay+by)/2))continue;
+      if(e.role==='ctx'){ctxRaw.push(ax*kM,ay*kM,bx*kM,by*kM);continue}let L=byKey.get(key);if(!L){L=[];byKey.set(key,L)}L.push([ax*kM,ay*kM,bx*kM,by*kM])}
+    pg.set(.25,'מחבר לצינורות רציפים');await sleep(10);
+    /* texts with a diameter, to name each run */
+    const data=await readPlanData();const T=[];for(const t of textsDecoded(data)){const sd=slopeDiaOf(t.d)||slopeDiaOf(t.d2)||(()=>{const p=parsePipeText(t.d,true);return p&&p.dia&&!/^\d\/4"$/.test(p.dia)?{dia:p.dia,mat:p.mat}:null})();if(sd)T.push({x:t.x*kM,y:t.y*kM,sd})}
+    const TG=new Grid(3);T.forEach((t,i)=>TG.addBox(t.x-.01,t.y-.01,t.x+.01,t.y+.01,i));
+    const typeFor=(sd)=>{const L2=lib();let t=findOrMakeType(sd.mat||'',sd.dia,null,diaColor(sd.dia));if(!t){t=L2.pipes.find(p=>!p.mat&&p.dia===sd.dia);if(!t){t={id:uid(),mat:'',dia:sd.dia,name:`צינור ${sd.dia}`,color:diaColor(sd.dia),w:/6"|160|200|250|315/.test(sd.dia)?3.2:2.6,section:'',desc:''};L2.pipes.push(t)}}return t};
+    const pipes=[];const items=[];let untyped=0;
+    for(const [key,raw] of byKey){const e=roles.get(key);
+      if(e.role==='pipe'){let runs=chainSegs(raw,.03).map(r=>simplifyRun(r));runs=bridgeRuns(runs,.9);runs=dedupeParallel(runs,.18);runs=runs.filter(r=>polyLen(r)>=.3);
+        for(const r of runs){let typeId=e.typeId||null,src='';if(!typeId){const mid=r[Math.floor(r.length/2)];let best=null,bd=2.5;for(const ti of TG.query(mid[0]-2.5,mid[1]-2.5,mid[0]+2.5,mid[1]+2.5)){const t=T[ti];const [dd]=distPoly([t.x,t.y],r);if(dd<bd){bd=dd;best=t}}if(best){typeId=typeFor(best.sd).id;src=best.sd.dia+(best.sd.slope?'-'+best.sd.slope:'')}}
+          if(!typeId){typeId=layerType(e).id;untyped++}pipes.push({id:uid(),t:'pipe',pts:r,typeId,auto:true,ok:true,layer:e.name,src})}}
+      if(e.role==='item'){/* closed little shapes → one fitting at their centre */const runs=chainSegs(raw,.03);const comp=[];const par=runs.map((_,i)=>i);const f=i=>par[i]===i?i:(par[i]=f(par[i]));const bb=runs.map(r=>bboxOf(r));const GG=new Grid(.5);bb.forEach((b,i)=>GG.addBox(b.x0-.05,b.y0-.05,b.x1+.05,b.y1+.05,i));
+        bb.forEach((b,i)=>{for(const j of GG.query(b.x0-.05,b.y0-.05,b.x1+.05,b.y1+.05))if(j!==i){const c=bb[j];if(!(c.x0>b.x1+.05||c.x1<b.x0-.05||c.y0>b.y1+.05||c.y1<b.y0-.05))par[f(i)]=f(j)}});
+        const groups=new Map();runs.forEach((r,i)=>{const k=f(i);let g=groups.get(k);if(!g){g=[];groups.set(k,g)}g.push(...r)});
+        for(const pts of groups.values()){const b=bboxOf(pts);const w=b.x1-b.x0,h=b.y1-b.y0;if(Math.max(w,h)<.25||Math.max(w,h)>3.5)continue;const round=pts.length>16&&Math.abs(w-h)<Math.max(w,h)*.15;
+          const it=manholeFor(e.name,e.itemId);
+          if(it)items.push({id:uid(),t:'item',itemId:it.id,x:(b.x0+b.x1)/2,y:(b.y0+b.y1)/2,auto:true,ok:true,layer:e.name})}}}
+    /* DWG blocks in a fittings layer: exact positions, name and attributes */
+    if(PL.cad)for(const q of PL.cad.inserts||[]){const li=PL.vecLay.indexOf(q.lay);const e=roles.get('L'+li);if(!e||e.role!=='item'||!inR(q.x,q.y))continue;const it=manholeFor([q.name,q.lay,...(q.att||[])].join(' '),e.itemId);if(it)items.push({id:uid(),t:'item',itemId:it.id,x:q.x*kM,y:q.y*kM,auto:true,ok:true,layer:e.name,src:(q.att||[]).join(' ')})}
+    /* one fitting per spot */
+    const itemsU=[];for(const o of items)if(!itemsU.some(q=>D([q.x,q.y],[o.x,o.y])<.4))itemsU.push(o);
+    pg.set(.75,'מבנה ברקע');await sleep(10);
+    /* background: only what is around the work, so the sheet stays light */
+    const R=6;const PG=new Grid(R);const ws=[];for(const o of pipes)for(let i=1;i<o.pts.length;i++){const a=o.pts[i-1],b=o.pts[i];ws.push([a,b]);PG.addBox(Math.min(a[0],b[0])-R,Math.min(a[1],b[1])-R,Math.max(a[0],b[0])+R,Math.max(a[1],b[1])+R,ws.length-1)}for(const o of itemsU){ws.push([[o.x,o.y],[o.x,o.y]]);PG.addBox(o.x-R,o.y-R,o.x+R,o.y+R,ws.length-1)}
+    const segs=[];for(let i=0;i<ctxRaw.length;i+=4){const mx=(ctxRaw[i]+ctxRaw[i+2])/2,my=(ctxRaw[i+1]+ctxRaw[i+3])/2;if(region||PG.query(mx,my,mx,my).size)segs.push(+ctxRaw[i].toFixed(3),+ctxRaw[i+1].toFixed(3),+ctxRaw[i+2].toFixed(3),+ctxRaw[i+3].toFixed(3))}
+    pg.set(.95,'מסיים');
+    pushUndo();const keep=d.objects.filter(o=>!(o.auto&&!o.locked&&(!region||inRect(o,region))));d.lay=null;d.objects=[...keep,...pipes,...itemsU];
+    d.ctx={segs,texts:[],grids:[],rooms:[],ils:[],strong:[],style:'clean',radius:R};d.layers=d.layers||{};d.layers.plan={...(d.layers.plan||{}),hidden:true};d.autoDone=true;
+    pg.close();S.sel.clear();PAGE_C=null;ctxSig=pipeSig();changed();renderStage();setTimeout(()=>{renderFloat();fitPage()},60);
+    const tot=pipes.reduce((a,o)=>a+pipeLen(o),0);
+    const m=modal(`<div class="mh"><div><h2>השרטוט מוכן</h2><p>נבנה רק ממה שבחרת${region?' ובתוך האזור שסימנת':''}</p></div></div><div class="mb"><div class="vtot"><div><small>צינורות</small><b>${pipes.length}</b></div><div><small>אורך כולל</small><b>${fmtM(tot,1)} מ'</b></div><div><small>שוחות ואביזרים</small><b>${itemsU.length}</b></div></div>
+      ${untyped?`<div class="chk w" style="margin-top:10px"><b>${untyped} צינורות בלי קוטר כתוב לידם</b> – נרשמו בכתב הכמויות לפי שם השכבה. משנים סוג/קוטר בלחיצה על צינור, או בחירת כולם ו"החלפת סוג לכל הצינורות".</div>`:''}
+      <div style="font-size:13.5px;color:var(--muted2);line-height:1.6;margin-top:10px">מה שלא צריך – מוחקים עם כלי "מחק" (נגיעה או גרירת מלבן). "אחורה" מחזיר הכול.</div></div><div class="mf"><button class="btn pri" data-x>אישור</button><button class="btn" data-again>חזרה לבחירת שכבות</button></div>`);
+    m.onclick=ev=>{if(ev.target.closest('[data-x]'))closeModal(m);if(ev.target.closest('[data-again]')){closeModal(m);doUndo();layersModal(region)}}}
+  catch(err){pg.close();console.error(err);toast('השרטוט לפי שכבות נכשל: '+err.message,6000)}}
+
+/* a pipe type named after its layer, for runs with no diameter written next to them */
+function layerType(e){const L=lib();let t=L.pipes.find(p=>p.layerName===e.name);if(!t){const col=/^#[0-9a-f]{6}$/i.test(e.color)&&colInfo(e.color).sat>.25?e.color:PALETTE[L.pipes.length%PALETTE.length];t={id:uid(),mat:'',dia:'',name:layDisp(e.name),layerName:e.name,color:col,w:2.6,section:'',desc:'צנרת – '+layDisp(e.name)};L.pipes.push(t)}return t}
+
 /* =========================================================
    submission sheet (clean engineering page), PDF / DXF / Excel
    ========================================================= */
+let SHEET_LAB_NEW=false,SHEET_CLIP=0;
 const PAPERS={A4:[297,210],A3:[420,297],A2:[594,420],A1:[841,594],A0:[1189,841]};
 const SHEET_SCALES=[10,20,25,50,75,100,125,150,200,250,300,400,500,750,1000,1250,1500,2000,2500,5000];
 const SH={paper:'auto',orient:'auto',showBilled:true,showCtx:true,showPhotos:true,N:null,page:0};
@@ -2816,7 +2996,7 @@ function planSheet(d){
   const tryPaper=(pk,orient)=>{let [pw,ph]=PAPERS[pk];if(orient==='portrait')[pw,ph]=[ph,pw];const m=10;let tb=pk==='A4'?66:pk==='A3'?82:pk==='A2'?96:112;
     // portrait: title block as a band along the bottom (like your sketches) → bigger drawing, larger scale
     // fixed band height: the page structure never moves when items are added or deleted
-    const b0=orient==='portrait'?({A4:62,A3:76,A2:90,A1:106,A0:126})[pk]:0;const band=b0?Math.round(b0*1.4):0;if(band)tb=0;
+    /* the quantities and all details always sit in one column on the right, top to bottom – same in every paper and direction */const band=0;
     const area={x0:m+4,y0:m+(band?12:6),x1:pw-m-tb-4,y1:ph-m-band-(band?10:6)};const aw=area.x1-area.x0,ah=area.y1-area.y0;
     const need=Math.max(w*1000/aw,h*1000/ah);const N=SH.N||Math.max(50,SHEET_SCALES.find(s=>s>=need)||Math.ceil(need));return {pk,orient,pw,ph,m,tb,band,area,N,fit:need<=N}};
   // locked page: once chosen, paper, direction, scale and position stay put; only grows if the drawing no longer fits
@@ -2846,8 +3026,8 @@ function sheetSVG(d,P,opt={}){const LBONLY=!!opt.labelsOnly;
   g+=`<rect x="${m}" y="${m}" width="${pw-2*m}" height="${ph-2*m}" fill="none" stroke="${ink}" stroke-width=".7"/><rect x="${m+1.6}" y="${m+1.6}" width="${pw-2*m-3.2}" height="${ph-2*m-3.2}" fill="none" stroke="${ink}" stroke-width=".25"/>`;
   const tbx=pw-m-1.6-tb;g+=`<line x1="${tbx}" y1="${m+1.6}" x2="${tbx}" y2="${ph-m-1.6}" stroke="${ink}" stroke-width=".45"/>`;
   if(page===0){
-    const g0=g.length;
-    g+=`<defs><clipPath id="ca"><rect x="${area.x0-4}" y="${area.y0-4}" width="${area.x1-area.x0+8}" height="${area.y1-area.y0+8}"/></clipPath></defs><g clip-path="url(#ca)">`;
+    const g0=g.length;var gEnd=0;
+    const CAID='ca'+(++SHEET_CLIP);g+=`<defs><clipPath id="${CAID}"><rect x="${area.x0-4}" y="${area.y0-4}" width="${area.x1-area.x0+8}" height="${area.y1-area.y0+8}"/></clipPath></defs><g clip-path="url(#${CAID})">`;
     // grids
     const planImg=opt.planImg&&SH.showCtx&&!LBONLY?opt.planImg:null;const SHOWCTX=SH.showCtx&&!LBONLY;
     if(planImg)g+=`<image href="${planImg.url}" x="${X(planImg.wx0)}" y="${Y(planImg.wy0)}" width="${(planImg.wx1-planImg.wx0)*s}" height="${(planImg.wy1-planImg.wy0)*s}" preserveAspectRatio="none"/>`;
@@ -2869,19 +3049,29 @@ function sheetSVG(d,P,opt={}){const LBONLY=!!opt.labelsOnly;
     for(const o of OBJ)if(o.t==='item'){const x=X(o.x),y=Y(o.y);const it=L.items.find(i=>i.id===o.itemId);const sz=it&&itemShape(it)?(itemSizeM(it)||[1,1]):null;let hw=1.8,hh=1.8;if(sz){const q=itemDisp(o,it,N);hw=sz[0]*q.k*1000/N/2;hh=sz[1]*q.k*1000/N/2}placed.push([x-hw,y-hh,x+hw,y+hh])}
     const fs=({A4:2.6,A3:2.9,A2:3.3,A1:3.8,A0:4.4})[lay.pk]||3;
     const labs=OBJ.filter(o=>o.t==='pipe').sort((a,b)=>pipeLen(b)-pipeLen(a));
+    /* labels are placed once and then stay: their spot is kept (relative to the pipe/item) for the editor, every zoom and the PDF */
+    const MEM=d===S.drawing;if(MEM)d.labels=d.labels||{};const LM=MEM?d.labels:LBS;
+    const pipeAnchor=o=>{const tot=polyLen(o.pts);let acc=0;for(let i=1;i<o.pts.length;i++){const l=D(o.pts[i-1],o.pts[i]);if(acc+l>=tot/2){const t=l?(tot/2-acc)/l:0;return [X(o.pts[i-1][0]+(o.pts[i][0]-o.pts[i-1][0])*t),Y(o.pts[i-1][1]+(o.pts[i][1]-o.pts[i-1][1])*t)]}acc+=l}return [X(o.pts[0][0]),Y(o.pts[0][1])]};
+    const memPos=(key,ax,ay,info)=>{if(!MEM)return;const L=LM[key]=LM[key]||{};L.pos={...info,rx:info.cx-ax,ry:info.cy-ay,b:info.b.map((v,i)=>v-(i%2?ay:ax))};delete L.pos.cx;delete L.pos.cy;SHEET_LAB_NEW=true};
+    const itemLab=(o,x,y,cands,tw,rf,render)=>{const key='i:'+o.id;const ps=LM[key]&&LM[key].pos;if(ps){g+=render(ps.rx,ps.ry);return}let ch=null;for(const [dx,dy] of cands){if(fits(x+dx,y+dy-rf,x+dx+tw,y+dy+.6)){ch=[dx,dy];break}}
+      if(!ch){ch=cands[0];placed.push([x+ch[0],y+ch[1]-rf,x+ch[0]+tw,y+ch[1]+.6])}g+=render(ch[0],ch[1]);memPos(key,x,y,{cx:x+ch[0],cy:y+ch[1],b:[x+ch[0],y+ch[1]-rf,x+ch[0]+tw,y+ch[1]+.6]})};
+    for(const o of OBJ){for(const key of (o.t==='pipe'?['p:'+o.id]:o.t==='item'?['i:'+o.id,'r:'+o.id]:[])){const ps=LM[key]&&LM[key].pos;if(!ps)continue;const A=o.t==='pipe'?pipeAnchor(o):[X(o.x),Y(o.y)];const dd=LM[key];placed.push([A[0]+ps.b[0]+(dd.dx||0),A[1]+ps.b[1]+(dd.dy||0),A[0]+ps.b[2]+(dd.dx||0),A[1]+ps.b[3]+(dd.dy||0)])}}
     /* every pipe gets its full label (type · Ø · length): beside the pipe along its direction, or – when there is no room – off to the side with a thin leader line */
-    for(const o of labs){const t=L.pipes.find(p=>p.id===o.typeId);const pl=pipeLen(o);if(pl<0.05)continue;const txt0=`${t?(t.mat?t.mat+' · ':'')+diaTxt(t.dia):'?'}${o.slope?' · '+o.slope:''} · L=${fu(pl,2,P)}${curU(P).e}`;const txt=LT('p:'+o.id,txt0);if(LBS['p:'+o.id]&&LBS['p:'+o.id].hidden)continue;
+    for(const o of labs){const t=L.pipes.find(p=>p.id===o.typeId);const pl=pipeLen(o);if(pl<0.05||(o.auto&&o.layer&&pl<2))continue;   /* short auto-drawn bits: counted in quantities, no label clutter */const txt0=`${t?(t.dia?(t.mat?t.mat+' · ':'')+diaTxt(t.dia):t.name||'?'):'?'}${o.slope?' · '+o.slope:''} · L=${fu(pl,2,P)}${curU(P).e}`;const txt=LT('p:'+o.id,txt0);if(LBS['p:'+o.id]&&LBS['p:'+o.id].hidden)continue;
       const fz=fs;const tw=fitW(txt,fz,FMONO)+3,th=fz*1.55;const col=t?t.color:'#64748B';
       const box=(cx,cy,ang)=>{const c=Math.abs(Math.cos(ang)),sn=Math.abs(Math.sin(ang));const w2=tw*c+th*sn,h2=tw*sn+th*c;return [cx-w2/2,cy-h2/2,cx+w2/2,cy+h2/2]};
       const tag=(cx,cy,deg,lead)=>LB('p:'+o.id,`${lead||''}<g transform="rotate(${deg} ${cx} ${cy})">${clean?'':`<rect x="${cx-tw/2}" y="${cy-th/2}" width="${tw}" height="${th}" rx=".6" fill="#fff" stroke="${col}" stroke-width=".25"/>`}<text style="paint-order:stroke" stroke="#fff" stroke-width="${clean?.9:0}" x="${cx}" y="${cy+fz*.36}" font-size="${fz}" text-anchor="middle" ${FM} font-weight="600" fill="${col}" direction="ltr">${esc(txt)}</text></g>`);
+      const AN=pipeAnchor(o);const ps=LM['p:'+o.id]&&LM['p:'+o.id].pos;
+      if(ps){const cx=AN[0]+ps.rx,cy=AN[1]+ps.ry;g+=tag(cx,cy,ps.ang||0,ps.lead?`<line x1="${AN[0]+ps.lx}" y1="${AN[1]+ps.ly}" x2="${cx+(ps.lx>ps.rx?tw/2:-tw/2)}" y2="${cy}" stroke="${col}" stroke-width=".22"/><circle cx="${AN[0]+ps.lx}" cy="${AN[1]+ps.ly}" r=".45" fill="${col}"/>`:'');continue}
       const segs=[];for(let i=1;i<o.pts.length;i++)segs.push([o.pts[i-1],o.pts[i],D(o.pts[i-1],o.pts[i])]);segs.sort((p,q)=>q[2]-p[2]);let done=false;
       for(const [a,b] of segs.slice(0,3)){const A=[X(a[0]),Y(a[1])],B=[X(b[0]),Y(b[1])];const sl=D(A,B);if(sl<1)continue;let ang=Math.atan2(B[1]-A[1],B[0]-A[0]);if(ang>Math.PI/2)ang-=Math.PI;if(ang<=-Math.PI/2)ang+=Math.PI;const nx=-Math.sin(ang),ny=Math.cos(ang);
         if(sl<tw*.8)continue;
         for(const side of [-1,1,-2.2,2.2]){for(const tt of [.5,.32,.68,.2,.8]){const mx=A[0]+(B[0]-A[0])*tt,my=A[1]+(B[1]-A[1])*tt;const cx=mx+nx*side*(th/2+1.2),cy=my+ny*side*(th/2+1.2);const bb=box(cx,cy,ang);
-          if(fits(...bb)){g+=tag(cx,cy,ang*180/Math.PI);done=true;break}}if(done)break}if(done)break}
+          if(fits(...bb)){g+=tag(cx,cy,ang*180/Math.PI);memPos('p:'+o.id,AN[0],AN[1],{cx,cy,ang:ang*180/Math.PI,b:bb});done=true;break}}if(done)break}if(done)break}
       if(!done){const a=segs[0][0],b=segs[0][1];const mx=X((a[0]+b[0])/2),my=Y((a[1]+b[1])/2);let put=null;
         for(const rr of [10,15,21,28,36,46,58])for(let k2=0;k2<16&&!put;k2++){const an=k2/16*2*Math.PI-Math.PI/2;const cx=mx+Math.cos(an)*(rr+tw/2*Math.abs(Math.cos(an))),cy=my+Math.sin(an)*rr;if(fits(cx-tw/2,cy-th/2,cx+tw/2,cy+th/2))put=[cx,cy]}
         if(!put){put=[mx,my-th*1.6];placed.push([put[0]-tw/2,put[1]-th/2,put[0]+tw/2,put[1]+th/2])}
+        memPos('p:'+o.id,AN[0],AN[1],{cx:put[0],cy:put[1],ang:0,lead:true,lx:mx-AN[0],ly:my-AN[1],b:[put[0]-tw/2,put[1]-th/2,put[0]+tw/2,put[1]+th/2]});
         const ex=put[0]+(put[0]>mx?-tw/2:tw/2);g+=tag(put[0],put[1],0,`<line x1="${mx}" y1="${my}" x2="${ex}" y2="${put[1]}" stroke="${col}" stroke-width=".22"/><circle cx="${mx}" cy="${my}" r=".45" fill="${col}"/>`)}}
     // items
     for(const o of OBJ)if(o.t==='item'){const it=L.items.find(i=>i.id===o.itemId);const x=X(o.x),y=Y(o.y);
@@ -2889,13 +3079,13 @@ function sheetSVG(d,P,opt={}){const LBONLY=!!opt.labelsOnly;
         if(o.label==='P4'||/P4/.test(nm)){g+=`<circle cx="${x}" cy="${y}" r="${r*.75}" fill="#fff" stroke="#DC2626" stroke-width=".3"/>`;const tw=2*fs*.55;for(const [dx,dy] of [[2.4,1],[-2.4-tw,1],[-tw/2,-2.6],[-tw/2,4]]){if(fits(x+dx,y+dy-fs*.8,x+dx+tw,y+dy+.4)){g+=LB('i:'+o.id,`<text x="${x+dx}" y="${y+dy}" font-size="${fs*.85}" ${FM} font-weight="600" fill="${ink}">${esc(LT('i:'+o.id,'P4'))}</text>`);break}}continue}
         if(it.sym==='trap'){g+=`<circle cx="${x}" cy="${y}" r="${r}" fill="#fff" stroke="#DC2626" stroke-width=".35"/><circle cx="${x}" cy="${y}" r="${r*.62}" fill="#DC2626"/>`;const tx='F.T. '+(nm.match(/\d\/4"?/)||['8/4'])[0].replace(/"?$/,'"');const tw=tx.length*fs*.55;for(const [dx,dy] of [[-r-1.2-tw,1],[r+1.2,1],[-tw/2,-r-1.6],[-tw/2,r+fs+.6]]){if(fits(x+dx,y+dy-fs*.8,x+dx+tw,y+dy+.4)){g+=LB('i:'+o.id,`<text x="${x+dx}" y="${y+dy}" font-size="${fs*.85}" ${FM} font-weight="600" fill="${ink}">${esc(LT('i:'+o.id,tx))}</text>`);break}}continue}
         if(it.sym==='kbn'){g+=`<circle cx="${x}" cy="${y}" r="${r*.7}" fill="#fff" stroke="#C026D3" stroke-width=".3"/><line x1="${x-r*.5}" y1="${y}" x2="${x+r*.5}" y2="${y}" stroke="#C026D3" stroke-width=".3"/>`;const tw=5*fs*.5;for(const [dx,dy] of [[1.8,-1.4],[-1.8-tw,-1.4],[1.8,3]]){if(fits(x+dx,y+dy-fs*.8,x+dx+tw,y+dy+.4)){g+=LB('i:'+o.id,`<text x="${x+dx+tw}" y="${y+dy}" font-size="${fs*.8}" ${F} fill="${ink}" text-anchor="end">${esc(LT('i:'+o.id,'ק.ב.נ'))}</text>`);break}}continue}
-        {const q=itemShape(it)&&!it.riser?itemDisp(o,it,N):null;const shp=q&&itemShapeSVG(it,x,y,1000/N*q.k,.6,o.color||ink,.35);if(shp){if(!LBONLY)g+=shp;const rf=fs*.85;const iname=itemFull(it);const tw=iname.length*rf*.55;const hs=Math.max(...q.sz)*q.k*1000/N/2;for(const [dx,dy] of [[hs+1.4,1],[-hs-1.4-tw,1],[-tw/2,-hs-1.6],[-tw/2,hs+rf+.8]]){if(fits(x+dx,y+dy-rf,x+dx+tw,y+dy+.6)){g+=LB('i:'+o.id,`<text x="${x+dx+tw}" y="${y+dy}" font-size="${rf}" ${F} font-weight="600" fill="${ink}" text-anchor="start" direction="rtl">${esc(LT('i:'+o.id,itemFull(it)))}</text>`);break}}continue}}
+        {const q=itemShape(it)&&!it.riser?itemDisp(o,it,N):null;const shp=q&&itemShapeSVG(it,x,y,1000/N*q.k,.6,o.color||ink,.35);if(shp){if(!LBONLY)g+=shp;const rf=fs*.85;const iname=itemFull(it);const tw=iname.length*rf*.55;const hs=Math.max(...q.sz)*q.k*1000/N/2;itemLab(o,x,y,[[hs+1.4,1],[-hs-1.4-tw,1],[-tw/2,-hs-1.6],[-tw/2,hs+rf+.8]],tw,rf,(dx,dy)=>LB('i:'+o.id,`<text x="${x+dx+tw}" y="${y+dy}" font-size="${rf}" ${F} font-weight="600" fill="${ink}" text-anchor="start" direction="rtl">${esc(LT('i:'+o.id,itemFull(it)))}</text>`));continue}}
         if(it.riser){g+=`<circle cx="${x}" cy="${y}" r="${r*.85}" fill="#fff" stroke="#DC2626" stroke-width=".35"/><circle cx="${x}" cy="${y}" r="${r*.25}" fill="#DC2626"/>`}
         else g+=symbolSVG(it.sym,x,y,r,ink)}
       else if(!LBONLY){const q=it&&!it.riser&&itemShape(it)?itemDisp(o,it,N):null;g+=(q&&itemShapeSVG(it,x,y,1000/N*q.k,.6,o.color||ink,.35))||symbolSVG(it?it.sym:'point',x,y,(it&&it.riser?2.2:1.8)*PW,o.color||ink)}
       if(it&&it.riser&&!clean){const t=L.pipes.find(p=>p.id===o.typeId);const tx=clean?`${it.name} ${t?diaTxt(t.dia):''} · ${fu(o.len??it.len??1,1,P)}${curU(P).e}`:riserLabel(it,t,o.len??it.len??1);const rf=fs*.92;const tw=tx.length*rf*.55+3,th=rf*1.55;
-        for(const [dx,dy] of [[6,-6],[-6-tw,-6],[6,6],[-6-tw,6],[10,-12],[-10-tw,-12],[10,12],[-10-tw,12],[0,-16],[0,16]]){const bx=x+dx,by=y+dy;if(fits(bx,by-th/2,bx+tw,by+th/2)){g+=`<line x1="${x}" y1="${y}" x2="${dx>0?bx:bx+tw}" y2="${by}" stroke="#C2410C" stroke-width=".25"/><rect x="${bx}" y="${by-th/2}" width="${tw}" height="${th}" rx=".6" fill="#FFF7ED" stroke="#C2410C" stroke-width=".3"/><text x="${bx+1.5}" y="${by+rf*.36}" font-size="${rf}" ${F} font-weight="700" fill="#C2410C" text-anchor="start" direction="ltr">${esc(tx)}</text>`;break}}}
-      else if(it&&!it.riser){const rf=fs*.85;const tw=itemFull(it).length*rf*.55;for(const [dx,dy] of [[4,1],[-4-tw,1],[4,-4],[-4-tw,-4],[4,5]]){if(fits(x+dx,y+dy-rf,x+dx+tw,y+dy+.6)){g+=LB('i:'+o.id,`<text x="${x+dx+tw}" y="${y+dy}" font-size="${rf}" ${F} font-weight="600" fill="${ink}" text-anchor="start" direction="rtl">${esc(LT('i:'+o.id,itemFull(it)))}</text>`);break}}}}
+        {const rk='r:'+o.id;const R=(dx,dy)=>{const bx=x+dx,by=y+dy;return LB(rk,`<line x1="${x}" y1="${y}" x2="${dx>0?bx:bx+tw}" y2="${by}" stroke="#C2410C" stroke-width=".25"/><rect x="${bx}" y="${by-th/2}" width="${tw}" height="${th}" rx=".6" fill="#FFF7ED" stroke="#C2410C" stroke-width=".3"/><text x="${bx+1.5}" y="${by+rf*.36}" font-size="${rf}" ${F} font-weight="700" fill="#C2410C" text-anchor="start" direction="ltr">${esc(tx)}</text>`)};const ps=LM[rk]&&LM[rk].pos;if(ps)g+=R(ps.rx,ps.ry);else{let ch=null;for(const [dx,dy] of [[6,-6],[-6-tw,-6],[6,6],[-6-tw,6],[10,-12],[-10-tw,-12],[10,12],[-10-tw,12],[0,-16],[0,16]]){if(fits(x+dx,y+dy-th/2,x+dx+tw,y+dy+th/2)){ch=[dx,dy];break}}if(!ch){ch=[6,-6];placed.push([x+6,y-6-th/2,x+6+tw,y-6+th/2])}g+=R(ch[0],ch[1]);memPos(rk,x,y,{cx:x+ch[0],cy:y+ch[1],b:[x+ch[0],y+ch[1]-th/2,x+ch[0]+tw,y+ch[1]+th/2]})}}}
+      else if(it&&!it.riser){const rf=fs*.85;const tw=itemFull(it).length*rf*.55;itemLab(o,x,y,[[4,1],[-4-tw,1],[4,-4],[-4-tw,-4],[4,5]],tw,rf,(dx,dy)=>LB('i:'+o.id,`<text x="${x+dx+tw}" y="${y+dy}" font-size="${rf}" ${F} font-weight="600" fill="${ink}" text-anchor="start" direction="rtl">${esc(LT('i:'+o.id,itemFull(it)))}</text>`));}}
     if(clean&&SH.showCtx){(d.ctx.ils||[]).forEach((iv,ii)=>{const x=X(iv.x),y=Y(iv.y);const tx=LT('il:'+ii,'I.L. '+iv.v);const tw=tx.length*fs*.52;for(const [dx,dy] of [[2,-2],[-2-tw,-2],[2,4],[-2-tw,4]]){if(fits(x+dx,y+dy-fs*.8,x+dx+tw,y+dy+.4)){g+=LB('il:'+ii,`<text x="${x+dx}" y="${y+dy}" font-size="${fs*.8}" ${FM} fill="${ink}">${esc(tx)}</text>`);break}}})
     }
     if(!LBONLY)for(const o of OBJ){
@@ -2903,7 +3093,7 @@ function sheetSVG(d,P,opt={}){const LBONLY=!!opt.labelsOnly;
         g+=`<g stroke="${ink}" stroke-width=".25"><line x1="${a2[0]}" y1="${a2[1]}" x2="${b2[0]}" y2="${b2[1]}"/><line x1="${A[0]}" y1="${A[1]}" x2="${a2[0]}" y2="${a2[1]}"/><line x1="${B[0]}" y1="${B[1]}" x2="${b2[0]}" y2="${b2[1]}"/>${[a2,b2].map(p=>`<line x1="${p[0]-1}" y1="${p[1]+1}" x2="${p[0]+1}" y2="${p[1]-1}" stroke-width=".4"/>`).join('')}</g><text x="${mx}" y="${my-1}" font-size="2.4" ${FM} text-anchor="middle" fill="${ink}" transform="rotate(${deg} ${mx} ${my})">${fmtM(D(o.a,o.b))}</text>`}
       if(o.t==='text')g+=`<text x="${X(o.x)}" y="${Y(o.y)}" font-size="${clamp((o.size||3.5)*.85,2.2,8)}" ${F} font-weight="600" fill="${o.color||ink}" text-anchor="middle" direction="${isHe(o.s)?'rtl':'ltr'}">${esc(o.s)}</text>`;
       if(o.t==='photo'&&SH.showPhotos&&o.show!==false)g+=`<circle cx="${X(o.x)}" cy="${Y(o.y)}" r="2.3" fill="${ink}"/><text x="${X(o.x)}" y="${Y(o.y)+.9}" font-size="2.4" ${FM} font-weight="600" fill="#fff" text-anchor="middle">${o.n}</text>`}
-    g+=`</g>`;if(opt.frameOnly&&!LBONLY)g=g.slice(0,g0);
+    g+=`</g>`;gEnd=g.length;if(opt.frameOnly&&!LBONLY)g=g.slice(0,g0);
     // scale bar + north
     const sbm=[5,10,20,25,50,100].find(v=>v*s>=25&&v*s<=70)||Math.round(40/s);const sx=area.x0+2,sy=area.y1-4;const seg=sbm*s/4;
     for(let i=0;i<4;i++)g+=`<rect x="${sx+i*seg}" y="${sy-1.6}" width="${seg}" height="1.6" fill="${i%2?'#fff':ink}" stroke="${ink}" stroke-width=".2"/>`;
@@ -2944,6 +3134,7 @@ function sheetSVG(d,P,opt={}){const LBONLY=!!opt.labelsOnly;
   g+=`<line x1="${tx0}" y1="${by}" x2="${tx1}" y2="${by}" stroke="${ink}" stroke-width=".2"/><text x="${tx0+2}" y="${by+4.2}" font-size="1.8" ${FM} fill="#94A3B8" letter-spacing=".6">FALILO · DRAFT &amp; FLOW</text><text x="${tx1-2}" y="${by+4.2}" font-size="1.8" ${FM} fill="#94A3B8" text-anchor="end">${lay.pk} · ${pw}×${ph}</text>`;
   if(P.company)g+=`<text x="${tx0+tw/2}" y="${ph-m-1.6-bh*4-7-6-2}" font-size="2.6" ${F} font-weight="700" fill="${ink}" text-anchor="middle" direction="rtl">${esc(P.company)}</text>`;
   }
+  if(opt.noFrame&&gEnd)g=g.slice(g0,gEnd);
   const svg=`<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 ${pw} ${ph}" width="${pw}mm" height="${ph}mm" style="direction:ltr">${opt.fontCss?`<style>${opt.fontCss}</style>`:''}<rect width="${pw}" height="${ph}" fill="#fff"/>${g}</svg>`;
   return {svg,lay:{...lay,pages}};
 }
@@ -2959,7 +3150,7 @@ async function openSheet(){
 }
 async function renderSheet(){const d=S.drawing;const urls={};for(const o of d.objects)if(o.t==='photo'&&o.blob){const b=await DB.blobGet(o.blob);if(b)urls[o.id]=URL.createObjectURL(b)}
   const l0=sheetSVG(d,S.project,{page:SH.page}).lay;const planImg=SH.page===0&&l0&&!(d.ctx&&d.ctx.style==='clean')?await planCrop(l0,IS_MOB?70:100):null;
-  const r=sheetSVG(d,S.project,{page:SH.page,photoUrls:urls,planImg});const v=$('#shView');if(!v)return;const lay=r.lay;
+  const r=sheetSVG(d,S.project,{page:SH.page,photoUrls:urls,planImg});if(SHEET_LAB_NEW){SHEET_LAB_NEW=false;scheduleSave()}const v=$('#shView');if(!v)return;const lay=r.lay;
   const W=v.clientWidth-56,H=v.clientHeight-56;const k=Math.min(W/lay.pw,H/lay.ph,4);
   v.innerHTML=`<div class="paper" style="width:${lay.pw*k}px;height:${lay.ph*k}px">${r.svg.replace(/width="[\d.]+mm" height="[\d.]+mm"/,`width="${lay.pw*k}" height="${lay.ph*k}"`)}</div>`;
   SH.k=k;bindSheetLabels(v.querySelector('svg'),k);
@@ -3393,7 +3584,7 @@ function dwgNorm(e){const p=o=>o?[o.x||0,o.y||0]:[0,0];const base={type:e.type,l
   return null}
 
 /* normalized entities → drawable geometry (segments per layer|color, texts) in units with y pointing down */
-function cadBuild(model){const {ents,blocks,layers}=model;const groups=new Map();const fills=new Map();const texts=[];const centers=[];let nseg=0;const xs=[],ys=[];
+function cadBuild(model){const {ents,blocks,layers}=model;const groups=new Map();const fills=new Map();const texts=[];const centers=[];const inserts=[];let nseg=0;const xs=[],ys=[];
   const layerOff=n=>{const L=layers[n];return L&&(L.off||L.frozen)};
   const colOf=(e,pc,lay)=>{let ci=e.ci;if(ci===256){const L=layers[e.layer==='0'&&lay?lay:e.layer];ci=L?Math.abs(L.ci==null?7:L.ci):7}if(ci===0)return pc||'#000000';return cadInk(aci(ci))};
   const add=(lay,col,x1,y1,x2,y2)=>{const key=lay+'|'+col;let g=groups.get(key);if(!g){g={lay,col,a:[]};groups.set(key,g)}g.a.push(x1,-y1,x2,-y2);nseg++;xs.push(x1,x2);ys.push(-y1,-y2)};
@@ -3416,7 +3607,7 @@ function cadBuild(model){const {ents,blocks,layers}=model;const groups=new Map()
         else{const at=e.at;al=[0,1,4,7].includes(at)?'left':[2,5,8].includes(at)?'center':'right';bl=at<=3?'top':at<=6?'middle':'bottom'}
         const p0=T(q[0],q[1]);const ux=M[0]*Math.cos(e.rot)+M[2]*Math.sin(e.rot),uy=M[1]*Math.cos(e.rot)+M[3]*Math.sin(e.rot);const sc=Math.hypot(M[2],M[3])||1;
         texts.push({x:p0[0],y:-p0[1],h:e.h*sc,rot:-Math.atan2(uy,ux),s:e.s,al,bl,col,lay});break}
-      case 'INSERT':{const b=blocks[e.name];if(!b||depth>8)break;const cs=Math.cos(e.rot),sn=Math.sin(e.rot);const Tm=[cs*e.sx,sn*e.sx,-sn*e.sy,cs*e.sy,e.p[0],e.p[1]];const B=[1,0,0,1,-b.base[0],-b.base[1]];
+      case 'INSERT':{const b=blocks[e.name];if(depth===0){const q=T(e.p[0],e.p[1]);inserts.push({x:q[0],y:-q[1],name:cadText(e.name||''),lay,att:(e.attribs||[]).map(a=>a.s).filter(Boolean)})}if(!b||depth>8)break;const cs=Math.cos(e.rot),sn=Math.sin(e.rot);const Tm=[cs*e.sx,sn*e.sx,-sn*e.sy,cs*e.sy,e.p[0],e.p[1]];const B=[1,0,0,1,-b.base[0],-b.base[1]];
         const mul=(A,C)=>[A[0]*C[0]+A[2]*C[1],A[1]*C[0]+A[3]*C[1],A[0]*C[2]+A[2]*C[3],A[1]*C[2]+A[3]*C[3],A[0]*C[4]+A[2]*C[5]+A[4],A[1]*C[4]+A[3]*C[5]+A[5]];const NM=mul(M,mul(Tm,B));
         for(const be of b.ents)emit(be,NM,col,depth+1,lay);for(const a of e.attribs||[])emit(a,M,col,depth+1,lay);break}}};
   for(const e of ents)emit(e,[1,0,0,1,0,0],null,0,null);
@@ -3429,16 +3620,17 @@ function cadBuild(model){const {ents,blocks,layers}=model;const groups=new Map()
   for(const g of groups.values()){const a=new Float32Array(g.a.length);for(let k=0;k<g.a.length;k+=2){a[k]=g.a[k]-x0;a[k+1]=g.a[k+1]-y0}const p=new Path2D();for(let k=0;k<a.length;k+=4){p.moveTo(a[k],a[k+1]);p.lineTo(a[k+2],a[k+3])}allSeg.set(a,o);o+=a.length;gl.push({lay:g.lay,col:g.col,path:p,a});lays.add(g.lay)}
   for(const t of texts){t.x-=x0;t.y-=y0;lays.add(t.lay)}
   const fl=[];for(const f of fills.values()){const p=new Path2D();const loops=f.loops.map(lp=>lp.map(q=>[q[0]-x0,q[1]-y0]));for(const lp of loops){p.moveTo(lp[0][0],lp[0][1]);for(let k=1;k<lp.length;k++)p.lineTo(lp[k][0],lp[k][1]);p.closePath()}fl.push({lay:f.lay,col:f.col,solid:f.solid,path:p,loops});lays.add(f.lay)}
+  for(const q of inserts){q.x-=x0;q.y-=y0}
   const cen=new Float32Array(centers.length);for(let k=0;k<centers.length;k+=2){cen[k]=centers[k]-x0;cen[k+1]=centers[k+1]-y0}
-  return {centers:cen,groups:gl,fills:fl,texts,segs:allSeg,w:x1-x0,h:y1-y0,layers:[...lays].sort(),units:model.units||0,origin:[x0,y0]}}
+  return {inserts,centers:cen,groups:gl,fills:fl,texts,segs:allSeg,w:x1-x0,h:y1-y0,layers:[...lays].sort(),units:model.units||0,origin:[x0,y0]}}
 function cadPaint(ctx,k){const C=VW.cad;for(const f of C.fills||[]){if(VW.hid.has(f.lay))continue;ctx.globalAlpha=f.solid?.55:.16;ctx.fillStyle=f.col;ctx.fill(f.path,'evenodd')}ctx.globalAlpha=1;ctx.lineCap='round';ctx.lineWidth=Math.max(.6,VW.dpr*.55)/(k*VW.dpr);
   for(const g of C.groups){if(VW.hid.has(g.lay))continue;ctx.strokeStyle=g.col;ctx.stroke(g.path)}
   const st=vEl('#vstage');const W=st.clientWidth,H=st.clientHeight;const [vx0,vy0]=s2v(0,0),[vx1,vy1]=s2v(W,H);
   for(const t of C.texts){if(VW.hid.has(t.lay))continue;const px=t.h*k;if(px<3.2)continue;if(t.x<vx0-t.h*40||t.x>vx1+t.h*40||t.y<vy0-t.h*20||t.y>vy1+t.h*20)continue;
     ctx.save();ctx.translate(t.x,t.y);if(t.rot)ctx.rotate(t.rot);ctx.font=`500 ${t.h*1.12}px "IBM Plex Sans Hebrew", Arial, sans-serif`;ctx.fillStyle=t.col;ctx.textAlign=t.al;ctx.textBaseline=t.bl;ctx.direction=isHe(t.s)?'rtl':'ltr';
     const lines=t.s.split('\n');lines.forEach((l,j)=>ctx.fillText(l,0,j*t.h*1.6));ctx.restore()}}
-async function vLoadCAD(file,pg){let model;
-  if(VW.kind==='dxf'){pg.set(.25,'קורא DXF');const buf=await file.arrayBuffer();let txt=new TextDecoder('utf-8').decode(buf);const ver=(txt.match(/\$ACADVER\s*\r?\n\s*1\s*\r?\n\s*(AC\d+)/)||[])[1]||'';
+async function cadModel(file,pg,kind){let model;kind=kind||(/\.dxf$/i.test(file.name||'')?'dxf':'dwg');
+  if(kind==='dxf'){pg.set(.25,'קורא DXF');const buf=await file.arrayBuffer();let txt=new TextDecoder('utf-8').decode(buf);const ver=(txt.match(/\$ACADVER\s*\r?\n\s*1\s*\r?\n\s*(AC\d+)/)||[])[1]||'';
       if(!(ver>='AC1021'))txt=new TextDecoder('windows-1252').decode(buf);const d=dxfParse(txt);const cp=d.header.$DWGCODEPAGE||'';
       const N=e=>dxfNorm(e,cp);const blocks={};for(const [k,b] of Object.entries(d.blocks))blocks[k]={base:b.base,ents:b.ents.map(N).filter(Boolean)};
       const layers={};for(const [k,l] of Object.entries(d.layers))layers[k]={ci:l.ci,off:l.ci<0,frozen:!!(l.flags&1)};model={ents:d.ents.map(N).filter(Boolean),blocks,layers,units:+(d.header.$INSUNITS||0)}}
@@ -3446,6 +3638,8 @@ async function vLoadCAD(file,pg){let model;
       const layers={};for(const l of (db.tables&&db.tables.LAYER&&db.tables.LAYER.entries)||[])layers[l.name]={ci:l.colorIndex==null?7:l.colorIndex,off:l.off||(l.colorIndex<0),frozen:!!l.frozen||!!((l.standardFlags||0)&1)};
       const blocks={};let msEnts=null;for(const b of (db.tables&&db.tables.BLOCK_RECORD&&db.tables.BLOCK_RECORD.entries)||[]){const ents=(b.entities||[]).map(dwgNorm).filter(Boolean);blocks[b.name]={base:b.basePoint?[b.basePoint.x||0,b.basePoint.y||0]:[0,0],ents};if(/^\*model_space$/i.test(b.name))msEnts=ents}
       model={ents:msEnts&&msEnts.length?msEnts:(db.entities||[]).map(dwgNorm).filter(Boolean),blocks,layers,units:+((db.header&&db.header.INSUNITS)||0)}}
+  return model}
+async function vLoadCAD(file,pg){const model=await cadModel(file,pg,VW.kind);
   pg.set(.75,'מצייר');await sleep(0);VW.cad=cadBuild(model);VW.pages=[{w:VW.cad.w,h:VW.cad.h}];VW.segs[0]=VW.cad.segs;vThumbOf((ctx,k)=>{ctx.setTransform(k,0,0,k,0,0);ctx.lineWidth=1.2/k;for(const g of VW.cad.groups){ctx.strokeStyle=g.col;ctx.stroke(g.path)}},VW.cad.w,VW.cad.h);
   /* drawing units → meters (default millimetres, the Israeli norm) */
   if(VW.ann.scale[0]==null){const U={1:.0254,2:.3048,4:.001,5:.01,6:1};VW.ann.scale[0]=U[VW.cad.units]||.001;VW.ann.scaleSrc={0:U[VW.cad.units]?'מהקובץ':'ברירת מחדל: מ"מ'}}}
@@ -3469,6 +3663,28 @@ async function vLoadOffice(file){const buf=await file.arrayBuffer();
     VW.office={paras}}
   VW.pages=[];vEl('#vstage').insertAdjacentHTML('beforeend',`<div class="voffice">${VW.office.sheets?`<div class="chips" style="margin-bottom:12px">${VW.office.sheets.map((s,i)=>`<button class="chip ${i?'':'on'}" data-vsheet="${i}">${esc(s.n)}</button>`).join('')}</div><div class="vtbl">${VW.office.sheets[0].html}</div>`
     :`<article>${VW.office.paras.map(p=>p.h?`<h3>${esc(p.h)}</h3>`:`<p dir="auto">${esc(p.t)}</p>`).join('')||'<p>לא נמצא טקסט בקובץ</p>'}</article>`}</div>`)}
+
+/* DWG/DXF → a plan for the drawing system: a clean vector PDF as the background (Hebrew kept), plus every line with its layer, the texts and the blocks */
+async function cadToPlan(file,onStep=()=>{}){const pg={set:(f,t)=>onStep&&onStep(t)};const model=await cadModel(file,pg);const C=cadBuild(model);
+  const U={1:.0254,2:.3048,4:.001,5:.01,6:1};const mpu=U[C.units]||.001;const wm=C.w*mpu,hm=C.h*mpu;
+  const SC=[20,25,50,75,100,125,150,200,250,300,400,500,750,1000,1250,1500,2000,2500,5000];const N=SC.find(n=>Math.max(wm,hm)*1000/n<=1150)||5000;
+  const sf=mpu/(PT2M*N);const M=40;const W=C.w*sf+2*M,H=C.h*sf+2*M;const ox=M,oy=M;
+  /* lines with layers, in plan points (y down) */
+  const lays=[];const layIx=new Map();const pal=[],palIx=new Map();let n=0;for(const g of C.groups)n+=g.a.length/4;
+  const segs=new Float32Array(n*4),lix=new Uint16Array(n),cix=new Uint16Array(n);let k=0;
+  for(const g of C.groups){let li=layIx.get(g.lay);if(li==null){li=lays.length;lays.push(g.lay);layIx.set(g.lay,li)}let ci=palIx.get(g.col);if(ci==null){ci=pal.length;pal.push(g.col);palIx.set(g.col,ci)}
+    for(let q=0;q<g.a.length;q+=4){segs[k*4]=ox+g.a[q]*sf;segs[k*4+1]=oy+g.a[q+1]*sf;segs[k*4+2]=ox+g.a[q+2]*sf;segs[k*4+3]=oy+g.a[q+3]*sf;lix[k]=li;cix[k]=ci;k++}}
+  for(const t of C.texts)if(!layIx.has(t.lay)){layIx.set(t.lay,lays.length);lays.push(t.lay)}for(const q of C.inserts)if(!layIx.has(q.lay)){layIx.set(q.lay,lays.length);lays.push(q.lay)}
+  const texts=C.texts.map(t=>({x:ox+t.x*sf,y:oy+t.y*sf,h:t.h*sf,s:t.s,rot:t.rot,lay:t.lay}));const inserts=C.inserts.map(q=>({...q,x:ox+q.x*sf,y:oy+q.y*sf}));
+  /* the background PDF */
+  onStep('מכין רקע וקטורי');const L=await getLib('pdflib');const doc=await L.PDFDocument.create();let font=null;try{font=await vFont(doc)}catch(e){}
+  const page=doc.addPage([W,H]);
+  for(const f of C.fills||[]){let d='';for(const lp of f.loops)d+='M'+lp.map(q=>(ox+q[0]*sf).toFixed(2)+' '+(oy+q[1]*sf).toFixed(2)).join('L')+'Z';if(d)page.drawSvgPath(d,{x:0,y:H,color:pdfColor(f.col,L),opacity:f.solid?.5:.14})}
+  for(const g of C.groups){let d='',c=0;const fl=()=>{if(d){page.drawSvgPath(d,{x:0,y:H,borderColor:pdfColor(g.col,L),borderWidth:.35});d='';c=0}};for(let q=0;q<g.a.length;q+=4){d+=`M${(ox+g.a[q]*sf).toFixed(2)} ${(oy+g.a[q+1]*sf).toFixed(2)}L${(ox+g.a[q+2]*sf).toFixed(2)} ${(oy+g.a[q+3]*sf).toFixed(2)}`;if(++c>4000)fl()}fl()}
+  if(font)for(const t of C.texts){const size=t.h*sf*1.05;if(size<.8)continue;const ang=-t.rot,ca=Math.cos(ang),sa=Math.sin(ang);t.s.split('\n').forEach((ln,j)=>{const s=visOrder(ln);let w=0;try{w=font.widthOfTextAtSize(s,size)}catch(e){return}
+      const dx=t.al==='center'?-w/2:t.al==='right'?-w:0;const dy=(t.bl==='top'?-size*.8:t.bl==='middle'?-size*.35:t.bl==='bottom'?size*.2:0)-j*size*1.55;const bx=ox+t.x*sf,by=H-(oy+t.y*sf);try{page.drawText(s,{x:bx+dx*ca-dy*sa,y:by+dx*sa+dy*ca,size,font,color:pdfColor(t.col,L),rotate:L.degrees(ang*180/Math.PI)})}catch(e){}})}
+  const pdf=new Blob([await doc.save()],{type:'application/pdf'});
+  return {pdf,w:W,h:H,N,data:{segs,lix,cix,pal,names:lays,texts,inserts}}}
 
 /* =========================================================
    viewer UI: tools, snapping, measure, markup, autosave, share
@@ -3498,11 +3714,11 @@ function vScaleTxt(){const m=VW.ann.scale[VW.pi];if(!m)return '';if(VW.kind==='p
 
 /* ---------- events ---------- */
 function vBind(){const st=vEl('#vstage');const sv=vEl('#vsv');
-  sv.addEventListener('pointerdown',vDown);sv.addEventListener('pointermove',vMove);sv.addEventListener('pointerup',vUp);sv.addEventListener('pointercancel',vUp);
+  sv.addEventListener('pointerdown',vDown);sv.addEventListener('lostpointercapture',e=>{if(VW.ptr.has(e.pointerId)&&VW.gest==null)VW.ptr.delete(e.pointerId)});sv.addEventListener('pointermove',vMove);sv.addEventListener('pointerup',vUp);sv.addEventListener('pointercancel',vUp);
   sv.addEventListener('dblclick',e=>{if(VW.tmp&&['poly','area','count'].includes(VW.tmp.t)){vFinishMulti()}});
   sv.addEventListener('wheel',e=>{e.preventDefault();const r=st.getBoundingClientRect();const zoom=e.ctrlKey||e.metaKey||e.deltaMode!==0||(Math.abs(e.deltaY)>=40&&!e.deltaX);
     if(zoom)vZoomAt(e.clientX-r.left,e.clientY-r.top,Math.exp(-e.deltaY*(e.ctrlKey?.012:.0022)));else{VW.view.tx-=e.deltaX;VW.view.ty-=e.deltaY;vViewChanged()}},{passive:false});
-  sv.addEventListener('contextmenu',e=>e.preventDefault());
+  sv.addEventListener('contextmenu',e=>{e.preventDefault();if(VW.tool!=='pan'){if(VW.tmp&&['poly','area','count','angle'].includes(VW.tmp.t))vFinishMulti();else VW.tmp=null;vSetTool('pan');vHintTxt('חזרה להזזה ובחירה')}});
   if(window.ResizeObserver)new ResizeObserver(()=>vResize()).observe(st)}
 document.addEventListener('click',async e=>{const vw=vEl('#vw');if(!vw||vw.classList.contains('hide'))return;const t=e.target.closest('[data-va],[data-vt],[data-vc],[data-vw],[data-vpage],[data-vlay],[data-vmeas],[data-vsr],[data-vsheet],[data-vtab],[data-vscale],[data-vex]');if(!t)return;const ds=t.dataset;
   if(ds.vt){vSetTool(ds.vt);return}
@@ -3655,7 +3871,8 @@ function vNearSeg(p){const S=VW.segs[VW.pi];if(!S||!S.grid)return null;const tol
 
 /* ---------- pointer handling ---------- */
 function vPt(e){const r=vEl('#vstage').getBoundingClientRect();return [e.clientX-r.left,e.clientY-r.top]}
-function vDown(e){const sp=vPt(e);VW.ptr.set(e.pointerId,{p:sp,t:e.pointerType});try{e.target.setPointerCapture&&vEl('#vsv').setPointerCapture(e.pointerId)}catch(_){}
+function vDown(e){const sp=vPt(e);if(e.isPrimary){VW.ptr.clear();VW.pinch=null}   /* a new gesture: forget fingers whose lift was never seen */
+  VW.ptr.set(e.pointerId,{p:sp,t:e.pointerType});try{e.target.setPointerCapture&&vEl('#vsv').setPointerCapture(e.pointerId)}catch(_){}
   if(VW.ptr.size===2){const g0=VW.gest;if(g0&&(g0.k==='draw'||g0.k==='adjust2'))VW.tmp=null;if(g0&&g0.k==='adjust'&&VW.tmp){VW.tmp.pts.pop();if(!VW.tmp.pts.length)VW.tmp=null}if(g0&&(g0.k==='move'||g0.k==='vertex')&&VW.undo.length)vRestore(VW.undo.pop());VW.gest=null;vAnnRender();const [a,b]=[...VW.ptr.values()];VW.pinch={d:D(a.p,b.p),m:[(a.p[0]+b.p[0])/2,(a.p[1]+b.p[1])/2],v:{...VW.view}};if(VW.tmp&&VW.tmp.dragOnly)VW.tmp=null;vLoupe(null);return}
   if(VW.ptr.size>2)return;const touch=e.pointerType!=='mouse';const w=s2v(...sp);
   {const h=e.target.closest('[data-vh]');if(h&&VW.sel&&vFind(VW.sel)){VW.undo.push(vSnapState());VW.gest={k:'vertex',i:+h.dataset.vh,id:VW.sel};return}}
@@ -3838,31 +4055,36 @@ async function vShareMenu(){const canShare=!!navigator.share;const multi=VW.kind
     if(act==='link'){try{toast('מעלה ל-Drive…');await gdToken(true);const root=await gdFolder('FALILO',null);const par=await gdFolder('קריאה ומדידה',root);const f=await gdUpload(safeName(name),blob,par);
         await gdApi(`https://www.googleapis.com/drive/v3/files/${f.id}/permissions`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({role:'reader',type:'anyone'})});const url=`https://drive.google.com/file/d/${f.id}/view`;
         try{await navigator.clipboard.writeText(url)}catch(_){}if(navigator.share){try{await navigator.share({title:name,url});return}catch(_){}}toast('הקישור הועתק: '+url,6000)}catch(err){toast('Drive: '+err.message,6000)}return}
-    if(act==='draw')vToDrawing(VW.kind==='pdf'?VW.file:VW.kind==='img'?VW.file:new File([blob],name,{type:'application/pdf'}))}}
+    if(act==='draw')vToDrawing(VW.kind==='pdf'||VW.kind==='img'?VW.file:VW.cad?new File([VW.file],VW.meta.name,{type:'application/octet-stream'}):new File([blob],name,{type:'application/pdf'}))}}
 async function vToDrawing(file){const projects=(await DB.all('projects')).sort((a,b)=>b.updated-a.updated);
   const r=await new Promise(res=>{const m=modal(`<div class="mh"><div><h2>לאיזה לקוח?</h2><p>ייפתח חשבון חדש עם התוכנית הזאת</p></div></div><div class="mb"><div class="opts">${projects.map(p=>`<button class="opt" data-p="${p.id}"><b>${esc(p.name)}</b></button>`).join('')}<button class="opt" data-p="new"><b>${ic('plus')} לקוח חדש</b></button></div></div><div class="mf"><button class="btn" data-x>ביטול</button></div>`,'');
     m.onclick=e=>{if(e.target.closest('[data-x]')){closeModal(m);res(null)}const b=e.target.closest('[data-p]');if(b){closeModal(m);res(b.dataset.p)}}});if(!r)return;
   await vFlush();let pid=r;if(r==='new'){const P=await projectModal(null);if(!P)return;pid=P.id}homeProject=pid;PREF.sys='draw';savePref();window.__pendingFile=file;if(VW.kind==='pdf'){const mk=vAnns().filter(a=>a.t==='hl'||a.t==='pen'||a.t==='line'||a.t==='poly').map(a=>({k:'ink',color:a.c,pts:a.pts.map(p=>p.slice()),w:a.w,id:a.id}));window.__pendingMarks=mk.length?{page:VW.pi+1,marks:mk}:null}$('#vw').classList.add('hide');$('#vw').innerHTML='';pdfClose(VW.pdf);VW.pdf=null;await goHome();startNewDrawing('pdf')}
 
+window.addEventListener('blur',()=>{VW.ptr.clear();VW.pinch=null;VW.gest=null;vLoupe&&vLoupe(null)});document.addEventListener('visibilitychange',()=>{if(document.hidden){VW.ptr.clear();VW.pinch=null;VW.gest=null}});
+
 /* =========================================================
    UI: home, modals, environment, projects, settings
    ========================================================= */
-function modal(html,cls=''){const bg=document.createElement('div');bg.className='mbg';bg.innerHTML=`<div class="modal ${cls}" role="dialog">${html}</div>`;document.body.appendChild(bg);
+function modal(html,cls=''){busy(false);try{if(typeof PTR!=='undefined')PTR.clear();if(typeof VW!=='undefined'){VW.ptr.clear();VW.pinch=null;VW.gest=null}}catch(e){}const bg=document.createElement('div');bg.className='mbg';bg.innerHTML=`<div class="modal ${cls}" role="dialog">${html}</div>`;document.body.appendChild(bg);
   bg.addEventListener('pointerdown',e=>{if(e.target===bg)bg._out=true});bg.addEventListener('click',e=>{if(e.target===bg&&bg._out&&!bg.dataset.lock)closeModal(bg)});
   setTimeout(()=>{const f=bg.querySelector('input:not([type=checkbox]):not([type=file]),select');if(f&&!IS_MOB)f.focus()},60);return bg}
 function closeModal(m){if(m&&m.parentNode){m.remove();setTimeout(()=>m.dispatchEvent(new Event('closed')),0)}}
-let toastT=null;function toast(s,ms=3200){let t=$('#toast');if(!t){t=document.createElement('div');t.id='toast';t.className='toast';document.body.appendChild(t)}t.textContent=s;clearTimeout(toastT);toastT=setTimeout(()=>t.remove(),ms)}
+let toastT=null;function toast(s,ms=3200){busy(false);let t=$('#toast');if(!t){t=document.createElement('div');t.id='toast';t.className='toast';document.body.appendChild(t)}t.textContent=s;clearTimeout(toastT);toastT=setTimeout(()=>t.remove(),ms)}
 function promptModal(title,val='',o={}){return new Promise(res=>{const m=modal(`<div class="mh"><h2>${esc(title)}</h2></div><div class="mb"><input class="f" id="pv" value="${esc(val)}" placeholder="${esc(o.ph||'')}" ${o.num?'inputmode="decimal"':''}></div><div class="mf"><button class="btn pri" data-ok>אישור</button><button class="btn" data-x>ביטול</button></div>`);
   const ok=()=>{const v=$('#pv',m).value.trim();closeModal(m);res(v)};m.addEventListener('click',e=>{if(e.target.closest('[data-ok]'))ok();if(e.target.closest('[data-x]')){closeModal(m);res(null)}});
   $('#pv',m).addEventListener('keydown',e=>{if(e.key==='Enter')ok()});m.addEventListener('closed',()=>res(null))})}
 function confirmModal(title,text,okTxt='אישור',danger){return new Promise(res=>{const m=modal(`<div class="mh"><div><h2>${esc(title)}</h2>${text?`<p>${esc(text)}</p>`:''}</div></div><div class="mf"><button class="btn ${danger?'danger':'pri'}" data-ok>${esc(okTxt)}</button><button class="btn" data-x>ביטול</button></div>`);
   m.addEventListener('click',e=>{if(e.target.closest('[data-ok]')){closeModal(m);res(true)}if(e.target.closest('[data-x]')){closeModal(m);res(false)}});m.addEventListener('closed',()=>res(false))})}
-function pickFile(accept,capture){if(window.__pendingFile){const f=window.__pendingFile;window.__pendingFile=null;return Promise.resolve(f)}
+/* small "loading" pill at the top – shown right after a file is chosen, until the next screen/dialog appears */
+let busyT=null;function busy(on,txt){let b=document.getElementById('gbusy');if(!on){if(b)b.remove();clearTimeout(busyT);return}if(!b){b=document.createElement('div');b.id='gbusy';b.className='gbusy';document.body.appendChild(b)}b.textContent=txt||'טוען…';clearTimeout(busyT);busyT=setTimeout(()=>busy(false),25000)}
+function pickFile(accept,capture){if(IS_MOB&&accept&&accept!=='image/*')accept='';   // phones grey out types they don't know (.falilo, .json, .dwg…)
+  if(window.__pendingFile){const f=window.__pendingFile;window.__pendingFile=null;return Promise.resolve(f)}
   return new Promise(res=>{const i=document.createElement('input');i.type='file';if(accept)i.accept=accept;if(capture&&IS_MOB)i.setAttribute('capture','environment');
     i.style.cssText='position:fixed;left:-1000px;top:0;width:1px;height:1px;opacity:0';document.body.appendChild(i);   // iPhone: a detached input can lose the chosen file
-    let done=false;const fin=f=>{if(done)return;done=true;res(f);setTimeout(()=>i.remove(),1000)};i.onchange=()=>fin(i.files&&i.files[0]||null);i.addEventListener('cancel',()=>fin(null));i.click()})}
+    let done=false;const fin=f=>{if(done)return;done=true;if(f)busy(true,'טוען '+(f.name||'קובץ')+'…');res(f);setTimeout(()=>i.remove(),1000)};i.onchange=()=>fin(i.files&&i.files[0]||null);i.addEventListener('cancel',()=>fin(null));i.click()})}
 /* the plan file is chosen right away, inside the tap – phones refuse to open the picker a moment later */
-function planAccept(mode){return mode==='photo'?'image/*,application/pdf':IS_MOB?'':'application/pdf,.pdf,image/*'}
+function planAccept(mode){return mode==='photo'?'image/*,application/pdf':IS_MOB?'':'application/pdf,.pdf,.dwg,.dxf,image/*'}
 function progress(title,steps){const m=modal(`<div class="mh"><div><h2>${esc(title)}</h2><p id="pgs">${esc(steps[0]||'')}</p></div></div><div class="mb"><div class="prog"><div id="pgb" style="width:4%"></div></div></div>`);m.dataset.lock=1;
   return {set:(f,s)=>{const b=$('#pgb',m);if(b)b.style.width=Math.round(clamp(f,0,1)*100)+'%';if(s)$('#pgs',m).textContent=s},close:()=>closeModal(m)}}
 function menu(anchor,items){$$('.menu').forEach(m=>m.remove());const m=document.createElement('div');m.className='menu';m.innerHTML=items.map((it,i)=>it==='-'?'<hr>':`<button data-i="${i}" ${it.danger?'style="color:var(--err)"':''}>${it.icon?ic(it.icon):''}${esc(it.t)}</button>`).join('');document.body.appendChild(m);
@@ -3887,7 +4109,7 @@ function envModal(){return new Promise(res=>{const guess=S.env||(IS_IOS||navigat
 let homeProject=null;
 const HERO_SVG=`<svg class="sky" viewBox="0 0 1000 250" preserveAspectRatio="xMinYMax slice" aria-hidden="true"><rect width="1000" height="250" fill="#132B23"/><g stroke="#163050" stroke-width="1"><path d="M0 40H1000M0 80H1000M0 120H1000M0 160H1000"/><path d="M100 0V190M200 0V190M300 0V190M400 0V190M500 0V190M600 0V190M700 0V190M800 0V190M900 0V190"/></g><rect x="0" y="190" width="1000" height="60" fill="#0E211A"/><path d="M0 190H1000" stroke="#BA9B5F" stroke-width="1.4"/><g fill="none" stroke="#BA9B5F" stroke-width="1.2"><path d="M20 190V110H70V190"/><path d="M28 122H62M28 136H62M28 150H62M28 164H62M28 178H62"/><path d="M80 190V84H128V190"/><path d="M86 94V186M98 94V186M110 94V186M122 94V186"/><path d="M90 84V70h16v14M88 70h20M92 70l-2-8h16l-2 8"/><path d="M140 190V70h10V58h28v12h10V190"/><path d="M146 82H182M146 98H182M146 114H182M146 130H182M146 146H182M146 162H182M146 178H182"/><path d="M200 190V84h8V70h8V56h6V38h4V12h2V38h4v18h6v14h8v14h8V190"/><path d="M212 96V186M224 96V186M236 96V186M248 96V186"/><path d="M276 190V104H330V190"/><path d="M276 118H330M276 134H330M276 150H330M276 166H330M276 182H330"/><path d="M342 190V96H404V190" stroke-dasharray="4 3"/></g><g fill="none" stroke="#E9E0CF" stroke-width="1.3"><path d="M372 190V30M380 190V30"/><path d="M372 180l8-12M372 168l8-12M372 156l8-12M372 144l8-12M372 132l8-12M372 120l8-12M372 108l8-12M372 96l8-12M372 84l8-12M372 72l8-12M372 60l8-12M372 48l8-12"/><path d="M330 30H560M330 38H560"/><path d="M376 30V12M376 12L330 30M376 12L560 30"/><rect x="330" y="38" width="20" height="14"/><path d="M500 38V96M492 96h16l-8 10zM482 106h36v10H482z"/></g><g fill="none" stroke="#BA9B5F" stroke-width="1.2"><path d="M440 190V132M470 190V132M432 132h46v-30c0-8-46-8-46 0zM430 102h50M455 102V90M440 150l30 22M470 150l-30 22"/></g><g fill="none" stroke-linecap="round"><path d="M60 190V214H600" stroke="#E9E0CF" stroke-width="3"/><path d="M150 190V228H640" stroke="#5E775E" stroke-width="2.5"/><path d="M240 190V206H560" stroke="#BA9B5F" stroke-width="2" stroke-dasharray="6 4"/><path d="M455 190V214" stroke="#E9E0CF" stroke-width="3"/></g><g fill="#0E211A" stroke="#E9E0CF" stroke-width="1.2"><rect x="290" y="208" width="14" height="26"/><rect x="520" y="208" width="14" height="26"/></g></svg>`;
 async function goHome(){if(S.drawing&&(S.dirty||SAVE.state==='busy'))try{await flushSave()}catch(e){}S.drawing=null;if(SAVE.state==='busy')SAVE.state='ok';closePlanRuntime();$('#ed').classList.add('hide');$('#ed').innerHTML='';SV=null;$('#sh').classList.add('hide');const h=$('#home');h.classList.remove('hide');h.classList.remove('enter');void h.offsetWidth;h.classList.add('enter');await renderHome()}
-async function renderHome(){
+async function renderHome(){busy(false);
   const projects=(await DB.all('projects')).sort((a,b)=>b.updated-a.updated);const drawings=await DB.all('drawings');
   if(!homeProject||!projects.some(p=>p.id===homeProject))homeProject=projects[0]&&projects[0].id;
   const P=projects.find(p=>p.id===homeProject);const ds=drawings.filter(d=>P&&d.projectId===P.id).sort((a,b)=>(b.date||'').localeCompare(a.date||'')||b.created-a.created);
@@ -3932,7 +4154,7 @@ document.addEventListener('click',async e=>{if($('#home').classList.contains('hi
   if(ds.dmenu){e.stopPropagation();drawingMenu(t,ds.dmenu);return}
   if(ds.pid){homeProject=ds.pid;renderHome();return}
   if(ds.did){const d=await DB.get('drawings',ds.did);const p=await DB.get('projects',d.projectId);openEditor(p,d);return}
-  if(ds.logo){const P=await DB.get('projects',homeProject);const f=await pickFile('image/*');if(!f)return;P.logos=P.logos||{};P.logos[ds.logo]=await logoData(f);if(ds.logo==='exec'){PREF.logoExec=P.logos.exec;savePref()}P.updated=Date.now();await DB.put('projects',P);renderHome();return}
+  if(ds.logo){const f=await pickFile('image/*');if(!f)return;const P=await DB.get('projects',homeProject);P.logos=P.logos||{};P.logos[ds.logo]=await logoData(f);if(ds.logo==='exec'){PREF.logoExec=P.logos.exec;savePref()}P.updated=Date.now();await DB.put('projects',P);renderHome();return}
   switch(ds.h){
     case 'sysdraw':PREF.sys='draw';savePref();renderHome();break;
     case 'sysview':PREF.sys='view';savePref();renderHome();break;
@@ -4006,15 +4228,15 @@ function startModal(){closeAllModals();const m=modal(`<div class="mh"><div><h2>�
 async function uploadPlan(kind){
   const f=await pickFile(planAccept(kind));if(!f)return;
   const pg=progress('קורא את התוכנית',['טוען']);
-  try{pg.set(.15,'טוען את הקובץ');const plan=await importPlanFile(f);if(!plan){pg.close();return}if(window.__pendingMarks&&plan.kind==='pdf'){const pm=window.__pendingMarks;window.__pendingMarks=null;if(!pm.page||(plan.page||1)===pm.page)plan.marks=pm.marks}
+  try{pg.set(.15,'טוען את הקובץ');const plan=await importPlanFile(f,t=>pg.set(.3,t));if(!plan){pg.close();return}if(window.__pendingMarks&&plan.kind==='pdf'){const pm=window.__pendingMarks;window.__pendingMarks=null;if(!pm.page||(plan.page||1)===pm.page)plan.marks=pm.marks}
     const d=S.drawing;const old=d.plan;d.plan=plan;d.ctx=null;d.autoDone=false;PL.data=null;PL.vec=null;
     pg.set(.45,'מציג את התוכנית');await openPlanRuntime(plan);
     let info=null;
-    if(plan.kind==='pdf'){pg.set(.7,'מחפש קנה מידה וסימונים');const data=await readPlanData();const sc=detectScale(data);if(sc){plan.N=sc.N;d.scaleSrc=sc.src==='measure'?'לפי המדידות שלך':'לפי התוכנית'}info={marks:data.marks.length,scale:sc}}
+    if(plan.kind==='pdf'){pg.set(.7,'מחפש קנה מידה וסימונים');const data=await readPlanData();const sc=plan.cad?null:detectScale(data);if(sc){plan.N=sc.N;d.scaleSrc=sc.src==='measure'?'לפי המדידות שלך':'לפי התוכנית'}if(plan.cad)d.scaleSrc='מקובץ ה-DWG (מדויק)';info={marks:data.marks.length,scale:sc}}
     pg.close();if(old&&old.blob!==plan.blob)DB.blobDel(old.blob).catch(()=>{});
     S.drawing.view=null;fitView({x0:0,y0:0,x1:plan.w*planK(plan),y1:plan.h*planK(plan)});changed();
-    if(plan.kind==='pdf'){await scaleModal(true,true);
-      if(info.marks)autoChoice();else drawAllModal()}
+    if(plan.kind==='pdf'){if(!plan.cad)await scaleModal(true,true);
+      if(info.marks)autoChoice();else layersModal()}
     else{const k=await new Promise(res=>{const m=modal(`<div class="mh"><div><h2>מה בתמונה?</h2><p>כדי שהאורכים יהיו במטרים, מכיילים לפי קו אחד שהאורך שלו ידוע</p></div></div><div class="mb"><div class="opts">
         <button class="opt" data-k="sketch"><b>שרטוט יד על דף</b><span>אבנה רק את הצורה. אחר כך לוחצים על כל קו ועיגול ומגדירים סוג, קוטר ואורך</span></button><button class="opt" data-k="marked"><b>תוכנית מסומנת במרקר</b><span>אכייל ואז אזהה את צבעי המרקר</span></button><button class="opt" data-k="trace"><b>צנרת באתר / סקיצה</b><span>אכייל, ואז משרטטים עם העט מעל התמונה</span></button></div></div>`);m.onclick=e=>{const b=e.target.closest('[data-k]');if(b){closeModal(m);res(b.dataset.k)}}});
       if(k==='sketch'){const pg2=progress('בונה את הצורה מהשרטוט',['']);try{pushUndo();const r=await sketchFromPhoto((f,t)=>pg2.set(f,t));pg2.close();changed();renderStage();setTimeout(()=>{renderFloat();fitPage()},60);
@@ -4222,6 +4444,7 @@ async function boot(){
   await renderHome();
   await introP;
   autoEnv();
+  if(location.protocol.startsWith('http'))vCheckUpdate();
   if(!(await DB.all('projects')).length){const p=await projectModal(null);if(p){homeProject=p.id;renderHome()}}
   if(navigator.storage&&navigator.storage.persist)navigator.storage.persist().catch(()=>{});
 }
@@ -4263,6 +4486,11 @@ async function clientMenu(anchor,pid){const P=await DB.get('projects',pid);if(!P
     {t:'שכפול (בלי החשבונות)',icon:'copy',fn:async()=>{const c={...clone(P),id:uid(),name:P.name+' (עותק)',created:Date.now(),updated:Date.now()};await DB.put('projects',c);homeProject=c.id;renderHome();toast('הלקוח שוכפל')}},'-',
     {t:'מחיקת הלקוח',icon:'trash',danger:true,fn:async()=>{const n=(await DB.all('drawings')).filter(d=>d.projectId===pid).length;if(!(await confirmModal(`למחוק את "${P.name}"?`,n?`יימחקו גם ${n} חשבונות. אי אפשר לבטל.`:'אי אפשר לבטל.','מחיקה',true)))return;
       for(const d of (await DB.all('drawings')).filter(d=>d.projectId===pid))await DB.del('drawings',d.id);await DB.del('projects',pid);if(homeProject===pid)homeProject=null;renderHome();toast('הלקוח נמחק')}}])}
+
+/* a newer version on the site → offer to reload (otherwise a phone may keep showing the old one) */
+let SITE_TAG=null;async function vCheckUpdate(){const tag=async()=>{try{const r=await fetch(location.pathname,{method:'HEAD',cache:'no-store'});return r.headers.get('etag')||r.headers.get('last-modified')}catch(e){return null}};
+  SITE_TAG=await tag();const check=async()=>{if(document.hidden||!navigator.onLine)return;const t=await tag();if(t&&SITE_TAG&&t!==SITE_TAG&&!document.getElementById('upbar')){const b=document.createElement('button');b.id='upbar';b.className='upbar';b.innerHTML='יש גרסה חדשה של FALILO · לחצו לרענון';b.onclick=async()=>{try{if(S.drawing)await flushSave();if(typeof vFlush==='function')await vFlush()}catch(e){}location.reload()};document.body.appendChild(b)}};
+  setInterval(check,5*60000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)check()})}
 </script>
 </body>
 </html>
