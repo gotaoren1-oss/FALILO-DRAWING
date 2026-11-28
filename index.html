@@ -422,6 +422,15 @@ html[data-env=phone] .top .savechip{display:none!important}
 .lcount{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
 .pickbar{position:fixed;top:78px;left:50%;transform:translateX(-50%);z-index:120;background:var(--navy);color:#E9E0CF;border-radius:14px;padding:8px 10px 8px 16px;display:flex;align-items:center;gap:10px;box-shadow:0 10px 26px #0004;font-size:14px;max-width:94vw}
 @media (max-width:640px){.lrow{flex-wrap:wrap}.lrow svg{width:90px;height:56px}.lsel{width:100%}}
+
+.laychk{border:2px solid var(--line)!important}.laychk.on{background:var(--navy);color:#E9E0CF;border-color:var(--navy)!important}
+
+.hlglow{animation:hlg 1.6s ease-in-out infinite}@keyframes hlg{50%{stroke-opacity:.25}}
+.flashline{fill:none;stroke:#FACC15;stroke-width:22;stroke-linecap:round;stroke-linejoin:round;opacity:.9;animation:fl 1.4s ease-out forwards;pointer-events:none}@keyframes fl{to{opacity:0;stroke-width:44}}
+.qrow.hlrow{outline:2.5px solid #FACC15;background:#FEF9C3}
+
+.vsw .sw.fav{position:relative;box-shadow:0 0 0 2px #fff,0 0 0 3.5px #BA9B5F}.vsw .sw.fav.on{box-shadow:0 0 0 2px #fff,0 0 0 4px var(--navy)}
+.vsw .sw.fav::after{content:"★";position:absolute;top:-9px;left:-5px;font-size:12px;color:#BA9B5F;text-shadow:0 0 2px #fff}
 </style>
 </head>
 <body>
@@ -1402,6 +1411,11 @@ async function readPlanData(){
         const s=decodeSHX(txt);data.texts.push({s,raw:txt,x:(p1[0]+p2[0])/2,y:(p1[1]+p2[1])/2,w:Math.max(ww,hh),h:Math.max(2,Math.min(ww,hh)),a:hh>ww*1.6?Math.PI/2:0,src:'ann'})}
     }catch(e){}
   }
+  /* FALILO marker colours drawn in any app – also when the PDF was saved flat (the mark became part of the drawing) */
+  try{const FAL=[['#ff2ec4',FAL_PIPE],['#7a2eff',FAL_ITEM]];for(const m of data.marks){if(!m.color)continue;for(const [h,c] of FAL)if(colorDist(m.color,h)<55)m.color=c}
+    if(!(S.drawing&&S.drawing.plan&&S.drawing.plan.cad)){const vec=await readVectors();if(vec){const pal=PL.vecPal,C=PL.vecC,W=PL.vecW;const hit=pal.map(c=>{const x=String(c).replace('fill:','');for(const [h,cc] of FAL)if(/^#[0-9a-f]{6}$/i.test(x)&&colorDist(x,h)<55)return cc;return null});
+      if(hit.some(Boolean)){const by={};for(let i=0,j=0;i<vec.length;i+=4,j++){const cc=hit[C[j]];if(!cc)continue;(by[cc]=by[cc]||{raw:[],w:0,n:0});by[cc].raw.push([vec[i],vec[i+1],vec[i+2],vec[i+3]]);by[cc].w+=W[j]||1;by[cc].n++}
+        for(const [cc,g] of Object.entries(by)){const w=Math.max(4,g.w/g.n);let k=0;for(const pts of chainSegs(g.raw,Math.max(1,w*.6))){if(polyLen(pts)<6)continue;data.marks.push({k:'ink',color:cc,pts,w,id:'fal'+(k++)+cc})}}}}}}catch(e){console.warn('falilo colours',e)}
   /* marks drawn in FALILO's viewer (marker / pen) travel with the plan */
   for(const m of (S.drawing&&S.drawing.plan&&S.drawing.plan.marks)||[])data.marks.push({...m,pts:m.pts.map(q=>q.slice())});
   if(PL.cad||(S.drawing&&S.drawing.plan&&S.drawing.plan.cad)){const c=PL.cad||await DB.blobGet(S.drawing.plan.cad);if(c){for(const t of c.texts||[])data.texts.push({s:t.s,x:t.x,y:t.y,w:t.h*t.s.length*.6,h:t.h,a:t.rot||0,src:'txt',lay:t.lay});PL.data=data;return data}}
@@ -1416,6 +1430,7 @@ async function readPlanData(){
 }
 
 /* vector line work of the plan (for nearby structure), in viewport pt */
+const isFalCol=c=>{const x=String(c||'').replace('fill:','');return /^#[0-9a-f]{6}$/i.test(x)&&(colorDist(x,'#ff2ec4')<55||colorDist(x,'#7a2eff')<55)};
 async function readVectors(onProg){
   if(PL.vec)return PL.vec;
   /* a DWG/DXF plan: lines come straight from the drawing, with their real layers */
@@ -1425,7 +1440,7 @@ async function readVectors(onProg){
   const ol=await PL.page.getOperatorList({annotationMode:pdfjs.AnnotationMode.DISABLE});
   const fn=ol.fnArray,ar=ol.argsArray;const VT=PL.vp.transform;
   const mul=(m,n)=>[m[0]*n[0]+m[2]*n[1],m[1]*n[0]+m[3]*n[1],m[0]*n[2]+m[2]*n[3],m[1]*n[2]+m[3]*n[3],m[0]*n[4]+m[2]*n[5]+m[4],m[1]*n[4]+m[3]*n[5]+m[5]];
-  let ctm=VT.slice();const stack=[];let color='#000000';const cstack=[];let lw=1;const wstack=[];const pal=[],palIx=new Map();const cIx=c=>{let i=palIx.get(c);if(i==null){i=pal.length;pal.push(c);palIx.set(c,i)}return i};
+  let ctm=VT.slice();const stack=[];let color='#000000',fcolor='#000000';const cstack=[],fstack=[];let lw=1;const wstack=[];const pal=[],palIx=new Map();const cIx=c=>{let i=palIx.get(c);if(i==null){i=pal.length;pal.push(c);palIx.set(c,i)}return i};
   let wid=new Float32Array(1<<18),cid=new Uint16Array(1<<18),lid=new Uint16Array(1<<18);const lays=['ללא שכבה'],layIx=new Map();let curL=0;const lst=[];
   let segs=new Float32Array(1<<20),n=0;const pend=[];
   const push=(x1,y1,x2,y2,w,c)=>{if(n+4>segs.length){const s2=new Float32Array(segs.length*2);s2.set(segs);segs=s2}const j=n>>2;if(j>=wid.length){const w2=new Float32Array(wid.length*2);w2.set(wid);wid=w2;const c2=new Uint16Array(cid.length*2);c2.set(cid);cid=c2;const l2=new Uint16Array(lid.length*2);l2.set(lid);lid=l2}wid[j]=w;cid[j]=c;lid[j]=curL;segs[n++]=x1;segs[n++]=y1;segs[n++]=x2;segs[n++]=y2};
@@ -1435,8 +1450,8 @@ async function readVectors(onProg){
   for(let i=0;i<fn.length;i++){const f=fn[i],a=ar[i];
     if(f===O.beginAnnotation){inAnn++;continue}if(f===O.endAnnotation){inAnn--;continue}if(inAnn)continue;
     switch(f){
-      case O.save:stack.push(ctm.slice());cstack.push(color);wstack.push(lw);break;
-      case O.restore:if(stack.length){ctm=stack.pop();color=cstack.pop();lw=wstack.pop()}break;
+      case O.save:stack.push(ctm.slice());cstack.push(color);fstack.push(fcolor);wstack.push(lw);break;
+      case O.restore:if(stack.length){ctm=stack.pop();color=cstack.pop();fcolor=fstack.pop()||fcolor;lw=wstack.pop()}break;
       case O.transform:ctm=mul(ctm,a);break;
       case O.paintFormXObjectBegin:stack.push(ctm.slice());cstack.push(color);wstack.push(lw);if(a&&a[0])ctm=mul(ctm,a[0]);break;
       case O.paintFormXObjectEnd:if(stack.length){ctm=stack.pop();color=cstack.pop();lw=wstack.pop()}break;
@@ -1445,6 +1460,7 @@ async function readVectors(onProg){
       case O.beginMarkedContentProps:{let li=curL;if(a&&a[0]==='OC'&&a[1]){const id=typeof a[1]==='string'?a[1]:(a[1].id||(a[1].ids&&a[1].ids[0]));if(id!=null){li=layIx.get(id);if(li==null){li=lays.length;lays.push(id);layIx.set(id,li)}}}lst.push(curL);curL=li;break}
       case O.beginMarkedContent:lst.push(curL);break;
       case O.endMarkedContent:curL=lst.length?lst.pop():0;break;
+      case O.setFillRGBColor:case O.setFillColor:if(a&&typeof a[0]==='string')fcolor=a[0];else if(a&&a.length>=3)fcolor=toHex(a[0]*(a[0]<=1?255:1),a[1]*(a[1]<=1?255:1),a[2]*(a[2]<=1?255:1));break;
       case O.setStrokeRGBColor:case O.setStrokeColor:if(a&&typeof a[0]==='string')color=a[0];else if(a&&a.length>=3)color=toHex(a[0]*(a[0]<=1?255:1),a[1]*(a[1]<=1?255:1),a[2]*(a[2]<=1?255:1));break;
       case O.constructPath:{const ops=a[0],cs=a[1];let k=0;
         for(const op of ops){
@@ -1456,7 +1472,7 @@ async function readVectors(onProg){
           else if(op===O.rectangle){const x=cs[k],y=cs[k+1],w=cs[k+2],h=cs[k+3];const p=[tp(x,y),tp(x+w,y),tp(x+w,y+h),tp(x,y+h)];for(let j=0;j<4;j++){const q=p[j],r=p[(j+1)%4];pend.push(q[0],q[1],r[0],r[1])}cx=p[0][0];cy=p[0][1];sx=cx;sy=cy;hasPt=true;k+=4}
         }break}
       case O.stroke:case O.closeStroke:case O.fillStroke:case O.eoFillStroke:case O.closeFillStroke:case O.closeEOFillStroke:case O.fill:case O.eoFill:
-        if(!isWhite(color)){const ww=+(lw*Math.hypot(ctm[0],ctm[1])).toFixed(2),ci=cIx(f===O.fill||f===O.eoFill?'fill:'+color:color);for(let j=0;j<pend.length;j+=4)push(pend[j],pend[j+1],pend[j+2],pend[j+3],ww,ci)}pend.length=0;hasPt=false;break;
+        if(!isWhite(f===O.fill||f===O.eoFill?fcolor:color)){const ww=+(lw*Math.hypot(ctm[0],ctm[1])).toFixed(2),ci=cIx(f===O.fill||f===O.eoFill?'fill:'+fcolor:color);for(let j=0;j<pend.length;j+=4)push(pend[j],pend[j+1],pend[j+2],pend[j+3],ww,ci)}pend.length=0;hasPt=false;break;
       case O.endPath:pend.length=0;hasPt=false;break;
     }
     if(onProg&&!(i%40000)){onProg(i/fn.length);await sleep(0)}
@@ -2009,7 +2025,7 @@ async function hlAutoDraw(marks,ch,kM,data,prog=()=>{}){
   const stat=new Map();const cand=[];
   for(let i=0,j=0;i<vec.length;i+=4,j++){const ax=vec[i],ay=vec[i+1],bx=vec[i+2],by=vec[i+3];
     if(Math.max(ax,bx)<sb.x0||Math.min(ax,bx)>sb.x1||Math.max(ay,by)<sb.y0||Math.min(ay,by)>sb.y1)continue;
-    const L=Math.hypot(bx-ax,by-ay);if(L<0.8)continue;const st=C[j]+'|'+W[j].toFixed(2);if(String(pal[C[j]]).startsWith('fill:'))continue;
+    const L=Math.hypot(bx-ax,by-ay);if(L<0.8)continue;const st=C[j]+'|'+W[j].toFixed(2);if(String(pal[C[j]]).startsWith('fill:')||isFalCol(pal[C[j]]))continue;   /* the marker itself is not a pipe line */
     const n=Math.max(2,Math.ceil(L/1.2));let c=0,run=0,best=0,bs=0,cs=0;for(let k=0;k<=n;k++){const t=k/n;if(covered(ax+(bx-ax)*t,ay+(by-ay)*t)){c++;if(!run)cs=k;run++;if(run>best){best=run;bs=cs}}else run=0}
     const fr=c/(n+1);let e=stat.get(st);if(!e)stat.set(st,e={tot:0,ins:0});e.tot+=L;if(fr>=.6)e.ins+=L;if(fr>=.3)cand.push({i,st,fr,t0:bs/n,t1:(bs+best-1)/n,L})}
   const styles=[...stat.entries()].filter(([,e])=>e.ins>0&&e.ins/e.tot>=.3).sort((a,b)=>b[1].ins-a[1].ins);
@@ -2263,6 +2279,8 @@ function setTool(t){S.tool=t;tmp=null;clickPts=null;if(!STG)return;renderTools()
   hint({pipe:S.env==='desktop'?'משרטטים ביד חופשית או לוחצים נקודה-נקודה. דאבל-קליק לסיום':'משרטטים בתנועה חופשית – הקו מתיישר לבד',item:'בוחרים אביזר למטה ולוחצים על המקום',riser:'לוחצים על קצה צינור – תתווסף עלייה של 1 מ\' באותו קוטר',dim:'לוחצים על שתי נקודות',region:'מסמנים מלבן – כל הסימונים בתוכו ישורטטו',text:'לוחצים איפה לכתוב',photo:'לוחצים איפה צולמה התמונה',boxsel:'גוררים מלבן – כל מה שבתוכו ייבחר. Ctrl+A בוחר הכל',erase:'נוגעים בכל דבר כדי למחוק אותו – גם קו מבנה בודד. גרירת מלבן מוחקת את כל מה שבתוכו'}[t]||'');
   if(t==='photo'){}
   renderStage()}
+/* what is being changed is highlighted on the plan */
+function hlTypeNow(){const o=cardFor&&typeof cardFor==='string'&&byId(cardFor);if(o&&o.t==='pipe'&&o.typeId)return o.typeId;return S.hlType||null}
 let hintT=null;function hint(s){let h=$('#hint');if(!s){h&&h.remove();return}if(!h){h=document.createElement('div');h.id='hint';h.className='hint';STG.appendChild(h)}h.textContent=s;clearTimeout(hintT);hintT=setTimeout(()=>h.remove(),4200)}
 function renderPbar(){const el=$('#pbar');if(!el)return;
   if(S.tool==='item'||S.tool==='riser'){const its=lib().items.filter(i=>S.tool==='riser'?i.riser:!i.riser);if(S.tool==='riser'&&!its.some(i=>i.id===S.itemId))S.itemId=(its[0]||{}).id;if(S.tool==='item'&&!its.some(i=>i.id===S.itemId))S.itemId=(its[0]||{}).id;
@@ -2315,9 +2333,10 @@ function _render(bgOnly){
   // previous months (billed) – gray, not counted this month
   $('#wbill').innerHTML=layHidden('billed')?'':(d.billed||[]).filter(o=>o.t==='pipe').map(o=>`<polyline points="${o.pts.map(p=>p.join(',')).join(' ')}" fill="none" stroke="#B6C2D1" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>`).join('');
   // pipes
-  const m=envMul();let h='';
+  const m=envMul();let h='';const HT=hlTypeNow();
   for(const o of d.objects){if(o.t!=='pipe'||!objShown(o))continue;const ed=objEditable(o);const t=pipeT(o.typeId);const col=t?t.color:'#94A3B8';const w=(t?t.w:2.6)*m*1.25;const sel=S.sel.has(o.id);const pts=o.pts.map(p=>p.join(',')).join(' ');
     if(sel)h+=`<polyline points="${pts}" fill="none" stroke="#FF6A13" stroke-opacity=".28" stroke-width="${w+12}" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>`;
+    else if(HT&&o.typeId===HT)h+=`<polyline points="${pts}" fill="none" stroke="#FACC15" stroke-opacity=".55" stroke-width="${w+10}" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke" class="hlglow"/>`;
     h+=`<polyline ${ed?`data-id="${o.id}"`:''} points="${pts}" fill="none" stroke="${col}" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"${o.undef?' stroke-dasharray="7 6"':''}/>`;
     if(ed)h+=`<polyline data-id="${o.id}" points="${pts}" fill="none" stroke="transparent" stroke-width="${Math.max(18,w+14)}" vector-effect="non-scaling-stroke" style="pointer-events:stroke"/>`}
   $('#wpipes').innerHTML=h;
@@ -2593,6 +2612,7 @@ function renderCard(){const host=$('#cardHost');if(!host)return;
     h=`<div class="row" style="justify-content:space-between"><div class="row" style="gap:8px"><span style="width:14px;height:14px;border-radius:4px;background:${t?t.color:'#94A3B8'}"></span><b style="font-size:16px">${esc(t?t.name:'ללא סוג')}</b></div>
       ${o.ok===false?`<button class="pill wk" data-a="okone" style="border:0">טרם נבדק · אישור</button>`:o.len!=null?`<span class="pill ok">נמדד</span>`:`<span class="pill mu">לפי שרטוט</span>`}</div>
       ${o.src?`<div style="font-size:12px;color:var(--muted)">בתוכנית כתוב: <b>${esc(o.src)}</b></div>`:''}
+      ${(()=>{const n=t?objs().filter(q=>q.t==='pipe'&&q.typeId===t.id&&q.id!==o.id).length:0;return n?`<div style="font-size:12px;background:#FEF9C3;border-radius:8px;padding:5px 8px;color:#713F12">עוד ${n} צינורות מאותו סוג מודגשים בצהוב. סעיף, עובי וצבע משתנים לכולם. החלפת סוג למטה – רק לצינור הזה.</div>`:''})()}
       <div class="k2"><div class="kv"><small>אורך (${curU().t})</small><input id="cLen" inputmode="decimal" value="${fu(pipeLen(o))}"></div><div class="kv"><small>סעיף</small><input id="cSec" dir="ltr" style="font-size:15px;text-align:right" value="${esc(t?t.section:'')}" placeholder="—"></div></div>
       ${o.len!=null&&Math.abs(o.len-geo)>0.05?`<div style="font-size:12px;color:var(--muted)">אורך לפי השרטוט: ${fu(geo)} ${curU().t} · <button data-a="lenreset" style="border:0;background:none;color:var(--blue);padding:0;font-size:12px">חזרה לשרטוט</button></div>`:''}
       <div class="lbl">שינוי מהיר</div><div class="chips">${lib().pipes.map(p=>`<button class="chip ${p.id===o.typeId?'on':''}" data-ctype="${p.id}"><span class="sw" style="background:${p.color};width:14px"></span>${esc(p.name)}</button>`).join('')}<button class="chip" data-a="newtype" style="border-style:dashed">+</button></div>
@@ -2650,8 +2670,8 @@ function renderSide(){const el=$('#sbody');if(!el)return;const ck=computeChecks(
   else if(sideTab==='lay'){const d=S.drawing;const cnt=k=>objs().filter(o=>layerOf(o)===k).length;
     const rows=[...lib().pipes.filter(p=>cnt('p:'+p.id)).map(p=>['p:'+p.id,(p.mat?p.mat+' ':'צינור ')+diaTxt(p.dia),`<span class="sw" style="background:${p.color};width:22px"></span>`,cnt('p:'+p.id)]),
       ...LAYERS_FIXED.filter(([k])=>k==='plan'?d.plan:k.startsWith('ctx:')?d.ctx:k==='billed'?(d.billed||[]).length:cnt(k)).map(([k,n])=>[k,n,'',k.startsWith('ctx:')||k==='plan'||k==='billed'?'':cnt(k)])];
-    el.innerHTML=`<div class="lbl" style="padding:2px 4px 8px">כל סוג בשכבה נפרדת · עין = הצגה · מנעול = נעילה לעריכה</div>`+rows.map(([k,n,sw,c])=>{const st=layState(k);return `<div class="qrow" style="cursor:default"><span style="width:26px;display:flex;justify-content:center">${sw}</span><div class="d"><div ${st.hidden?'style="opacity:.45"':''}>${esc(n)}</div>${c!==''?`<div class="c">${c} פריטים</div>`:''}</div>
-      ${c!==''&&c?`<button class="btn sm icon" data-laysel="${k}" title="בחירת כל השכבה" aria-label="בחירת כל השכבה">${ic('selall')}</button>`:''}<button class="btn sm icon" data-layeye="${k}" aria-label="הצגה">${ic(st.hidden?'eyeoff':'eye')}</button><button class="btn sm icon" data-laylock="${k}" aria-label="נעילה" ${st.locked?'style="color:var(--warn);border-color:#FED7AA"':''}>${ic(st.locked?'lockic':'unlock')}</button></div>`}).join('');
+    el.innerHTML=`<div class="lbl" style="padding:2px 4px 8px">כל סוג בשכבה נפרדת · ✓ = שכבה פעילה (מוצגת) · מנעול = נעילה לעריכה</div>`+rows.map(([k,n,sw,c])=>{const st=layState(k);return `<div class="qrow" style="cursor:default"><span style="width:26px;display:flex;justify-content:center">${sw}</span><div class="d"><div ${st.hidden?'style="opacity:.45"':''}>${esc(n)}</div>${c!==''?`<div class="c">${c} פריטים</div>`:''}</div>
+      <button class="btn sm icon laychk ${st.hidden?'':'on'}" data-layeye="${k}" title="${st.hidden?'כבויה – לחיצה מפעילה':'פעילה – לחיצה מכבה'}" aria-label="הפעלה וכיבוי">${st.hidden?'':ic('check')}</button><button class="btn sm icon" data-laylock="${k}" aria-label="נעילה" ${st.locked?'style="color:var(--warn);border-color:#FED7AA"':''}>${ic(st.locked?'lockic':'unlock')}</button></div>`}).join('');
     $('#sfoot').innerHTML=`<button class="btn sm" data-a="layshowall">${ic('eye')}להציג הכל</button><button class="btn sm" data-a="layunlockall">${ic('unlock')}לשחרר הכל</button>`}
   else{el.innerHTML=`<div class="lbl" style="padding:2px 4px 8px">סוגי צנרת של ${esc(S.project.name)}</div>`+lib().pipes.map(p=>`<div class="qrow" data-edtype="${p.id}"><span class="sw" style="background:${p.color};width:26px"></span><div class="d"><div>${esc(p.name)}</div><div class="c">${esc(p.section||'ללא סעיף')}</div></div>${ic('pen')}</div>`).join('')+
       `<div class="lbl" style="padding:14px 4px 8px">אביזרים</div>`+lib().items.map(i=>`<div class="qrow" data-editem="${i.id}"><span style="width:26px;display:flex;justify-content:center">${symIcon(i.sym,i)}</span><div class="d"><div>${esc(i.name)}</div><div class="c">${i.unit==='none'?'לא נספר':i.unit==='m'?'מטר':'יחידה'} · ${esc(i.section||'ללא סעיף')}</div></div>${ic('pen')}</div>`).join('');
@@ -2685,10 +2705,10 @@ async function onEdClick(e){
   if(ds.tool){if(ds.tool==='photo'&&false)return;setTool(ds.tool);return}
   if(ds.ptype){S.typeId=ds.ptype;renderPbar();if(S.tool!=='pipe')setTool('pipe');return}
   if(ds.pitem){S.itemId=ds.pitem;renderPbar();return}
-  if(ds.ctype){const o=byId(cardFor);S.lastType=ds.ctype;if(o)mut(()=>{o.typeId=ds.ctype;o.ok=true;o.undef=false;for(const i of objs())if(i.t==='item'&&i.typeId&&D([i.x,i.y],o.pts[0])<0.05||i.t==='item'&&i.typeId&&D([i.x,i.y],o.pts[o.pts.length-1])<0.05)i.typeId=ds.ctype});return}
+  if(ds.ctype){const o=byId(cardFor);S.lastType=ds.ctype;if(o)flashObj(o.id);if(o)mut(()=>{o.typeId=ds.ctype;o.ok=true;o.undef=false;for(const i of objs())if(i.t==='item'&&i.typeId&&D([i.x,i.y],o.pts[0])<0.05||i.t==='item'&&i.typeId&&D([i.x,i.y],o.pts[o.pts.length-1])<0.05)i.typeId=ds.ctype});return}
   if(ds.citem){const o=byId(cardFor);if(o)mut(()=>{o.itemId=ds.citem;o.ok=true;o.undef=false});return}
   if(ds.tab){sideTab=ds.tab;renderSide();return}
-  if(ds.qkey){qtyEditor(ds.qkey);return}
+  if(ds.qkey){const k=ds.qkey;if(k.startsWith('p:')&&S.hlType!==k.slice(2)){S.hlType=k.slice(2);renderStage();const n=objs().filter(o=>o.t==='pipe'&&o.typeId===S.hlType).length;toast(`${n} צינורות מהשורה הזאת מודגשים בצהוב · לחיצה נוספת פותחת עריכה`);$$('.qrow').forEach(r=>r.classList.toggle('hlrow',r.dataset.qkey===k));return}S.hlType=null;qtyEditor(k);return}
   if(ds.chk){const c=computeChecks().list[+ds.chk];if(!c)return;S.sel=new Set(c.ids);const os=c.ids.map(byId).filter(Boolean);if(os.length){const pts=[];for(const o of os)pts.push(...(o.pts||[[o.x,o.y]]));const b=bboxOf(pts,1.5);fitView(b)}renderStage();return}
   if(ds.edtype){typeModal(pipeT(ds.edtype));return}
   if(ds.editem){itemModal(itemT(ds.editem));return}
@@ -2748,7 +2768,8 @@ async function autoModal(region){
   // remember color meaning for this client
   for(const [k,v] of Object.entries(choices))S.project.colorMap[k]=v;
   const pg=progress('משרטט את מה שסימנת',['קורא סימונים','מחבר ומיישר','קורא קטרים ואביזרים','אוסף מבנה קרוב וצירים','מסיים']);
-  try{pushUndo();const res=d.plan.kind==='pdf'?await autoDrawFromMarks(choices,{region},(f,s)=>pg.set(f,s)):await autoDrawFromImage(choices,{region},(f,s)=>pg.set(f,s));
+  try{pushUndo();const before=new Set(d.objects.map(o=>o.id));const res=d.plan.kind==='pdf'?await autoDrawFromMarks(choices,{region},(f,s)=>pg.set(f,s)):await autoDrawFromImage(choices,{region},(f,s)=>pg.set(f,s));
+    if(d.plan.kind==='pdf'){const cr=cleanAutoPipes(d.objects.filter(o=>!before.has(o.id)).map(o=>o.id));res.pipes=cr.pipes||res.pipes;res.items=(res.items||0)+(cr.manholes||0)}
     d.autoDone=true;if(d.ctx&&d.ctx.style==='clean'){d.layers=d.layers||{};d.layers.plan={...(d.layers.plan||{}),hidden:true}}pg.close();S.sel.clear();ctxSig=pipeSig();changed();renderStage();setTimeout(()=>{renderFloat();fitPage()},60);summaryModal(res)}
   catch(e){pg.close();console.error(e.stack||e);toast('השרטוט האוטומטי נכשל: '+e.message)}
 }
@@ -2837,6 +2858,10 @@ function pageMenu(){const d=S.drawing;const L=PAGE_LAY||{};const has=d.objects.s
 
 window.addEventListener('blur',()=>{PTR.clear();if(gesture&&gesture.k==='pinch')gesture=null});
 
+/* a short pulse around what just changed, so it is clear on the plan */
+function flashObj(id){setTimeout(()=>{const o=byId(id);if(!o||!o.pts||!SV)return;const ov=$('#ov');if(!ov)return;const pts=o.pts.map(toScr).map(p=>p.join(',')).join(' ');const el=document.createElementNS('http://www.w3.org/2000/svg','polyline');el.setAttribute('points',pts);el.setAttribute('class','flashline');ov.appendChild(el);setTimeout(()=>el.remove(),1500)},60)}
+document.addEventListener('pointerdown',e=>{if(S.hlType&&!e.target.closest('.qrow')&&e.target.closest('#sv')){S.hlType=null;$$('.qrow').forEach(r=>r.classList.remove('hlrow'));if(SV)renderStage()}},true);
+
 /* =========================================================
    drawing from layers: every PDF/DWG layer (or, in a flat PDF, every line style)
    gets a role – pipe (of a type), manholes/fittings, building background, or hidden.
@@ -2854,7 +2879,7 @@ function layGuess(name){const n=String(name).toLowerCase();
 /* groups = layers (or line styles when the PDF has no layers) */
 async function layerGroups(){const pg=progress('קורא את שכבות התוכנית',['']);let vec;try{vec=await readVectors(p=>pg.set(.05+p*.85,'קורא את קווי התוכנית'))}catch(e){pg.close();toast(e.message);return null}pg.close();if(!vec)return null;
   const kM=planK(S.drawing.plan);const W=PL.vecW,C=PL.vecC,pal=PL.vecPal,LI=PL.vecL;const useLay=!!(PL.vecLay&&PL.vecLay.length>1);const map=new Map();
-  for(let i=0,j=0;i<vec.length;i+=4,j++){const col=String(pal[C[j]]||'');if(col.startsWith('fill:'))continue;const L=Math.hypot(vec[i+2]-vec[i],vec[i+3]-vec[i+1]);if(L<.3)continue;
+  for(let i=0,j=0;i<vec.length;i+=4,j++){const col=String(pal[C[j]]||'');if(col.startsWith('fill:')||isFalCol(col))continue;const L=Math.hypot(vec[i+2]-vec[i],vec[i+3]-vec[i+1]);if(L<.3)continue;
     const key=useLay?'L'+LI[j]:'S'+C[j]+'|'+W[j].toFixed(2);let e=map.get(key);if(!e){e={key,name:useLay?PL.vecLay[LI[j]]:col,color:col,w:W[j],len:0,n:0,idx:[],cols:{},ins:0,txt:0};map.set(key,e)}
     e.len+=L;e.n++;e.cols[col]=(e.cols[col]||0)+L;if(e.idx.length<6000)e.idx.push(i)}
   if(PL.cad){for(const q of PL.cad.inserts||[]){const li=PL.vecLay.indexOf(q.lay);const key='L'+li;let e=map.get(key);if(!e){e={key,name:q.lay,color:'#334155',w:1,len:0,n:0,idx:[],cols:{},ins:0,txt:0};map.set(key,e)}e.ins++}
@@ -2949,8 +2974,8 @@ async function layersDraw(G,list,region){const d=S.drawing;const plan=d.plan;con
     const typeFor=(sd)=>{const L2=lib();let t=findOrMakeType(sd.mat||'',sd.dia,null,diaColor(sd.dia));if(!t){t=L2.pipes.find(p=>!p.mat&&p.dia===sd.dia);if(!t){t={id:uid(),mat:'',dia:sd.dia,name:`צינור ${sd.dia}`,color:diaColor(sd.dia),w:/6"|160|200|250|315/.test(sd.dia)?3.2:2.6,section:'',desc:''};L2.pipes.push(t)}}return t};
     const pipes=[];const items=[];let untyped=0;
     for(const [key,raw] of byKey){const e=roles.get(key);
-      if(e.role==='pipe'){let runs=chainSegs(raw,.03).map(r=>simplifyRun(r));runs=bridgeRuns(runs,.9);runs=dedupeParallel(runs,.18);runs=runs.filter(r=>polyLen(r)>=.3);
-        for(const r of runs){let typeId=e.typeId||null,src='';if(!typeId){const mid=r[Math.floor(r.length/2)];let best=null,bd=2.5;for(const ti of TG.query(mid[0]-2.5,mid[1]-2.5,mid[0]+2.5,mid[1]+2.5)){const t=T[ti];const [dd]=distPoly([t.x,t.y],r);if(dd<bd){bd=dd;best=t}}if(best){typeId=typeFor(best.sd).id;src=best.sd.dia+(best.sd.slope?'-'+best.sd.slope:'')}}
+      if(e.role==='pipe'){const net=cleanNetwork(raw.map(s=>({a:[s[0],s[1]],b:[s[2],s[3]]})));for(const m of net.manholes){const it=manholeFor(e.name,null);if(it)items.push({id:uid(),t:'item',itemId:it.id,x:m.x,y:m.y,auto:true,ok:true,layer:e.name,src:'סמל שוחה בתוכנית'})}
+        for(const rr of net.runs){const r=rr.pts;let typeId=e.typeId||null,src='';if(!typeId){const mid=r[Math.floor(r.length/2)];let best=null,bd=2.5;for(const ti of TG.query(mid[0]-2.5,mid[1]-2.5,mid[0]+2.5,mid[1]+2.5)){const t=T[ti];const [dd]=distPoly([t.x,t.y],r);if(dd<bd){bd=dd;best=t}}if(best){typeId=typeFor(best.sd).id;src=best.sd.dia+(best.sd.slope?'-'+best.sd.slope:'')}}
           if(!typeId){typeId=layerType(e).id;untyped++}pipes.push({id:uid(),t:'pipe',pts:r,typeId,auto:true,ok:true,layer:e.name,src})}}
       if(e.role==='item'){/* closed little shapes → one fitting at their centre */const runs=chainSegs(raw,.03);const comp=[];const par=runs.map((_,i)=>i);const f=i=>par[i]===i?i:(par[i]=f(par[i]));const bb=runs.map(r=>bboxOf(r));const GG=new Grid(.5);bb.forEach((b,i)=>GG.addBox(b.x0-.05,b.y0-.05,b.x1+.05,b.y1+.05,i));
         bb.forEach((b,i)=>{for(const j of GG.query(b.x0-.05,b.y0-.05,b.x1+.05,b.y1+.05))if(j!==i){const c=bb[j];if(!(c.x0>b.x1+.05||c.x1<b.x0-.05||c.y0>b.y1+.05||c.y1<b.y0-.05))par[f(i)]=f(j)}});
@@ -2979,6 +3004,55 @@ async function layersDraw(G,list,region){const d=S.drawing;const plan=d.plan;con
 
 /* a pipe type named after its layer, for runs with no diameter written next to them */
 function layerType(e){const L=lib();let t=L.pipes.find(p=>p.layerName===e.name);if(!t){const col=/^#[0-9a-f]{6}$/i.test(e.color)&&colInfo(e.color).sat>.25?e.color:PALETTE[L.pipes.length%PALETTE.length];t={id:uid(),mat:'',dia:'',name:layDisp(e.name),layerName:e.name,color:col,w:2.6,section:'',desc:'צנרת – '+layDisp(e.name)};L.pipes.push(t)}return t}
+
+/* =========================================================
+   clean network: from many little lines (dashes, broken polylines, symbols)
+   to straight pipes, manhole to manhole, with the manholes found
+   input: segs [{a:[x,y],b:[x,y],typeId}] in metres
+   ========================================================= */
+function dpSimplify(pts,eps){if(pts.length<3)return pts;let dm=0,ix=0;const a=pts[0],b=pts[pts.length-1];for(let i=1;i<pts.length-1;i++){const d=distSeg(pts[i],a,b);if(d>dm){dm=d;ix=i}}
+  if(dm>eps){const l=dpSimplify(pts.slice(0,ix+1),eps),r=dpSimplify(pts.slice(ix),eps);return [...l.slice(0,-1),...r]}return [a,b]}
+function findManholes(segs){const S2=segs.map((s,i)=>({...s,i,L:D(s.a,s.b)})).filter(s=>s.L<1.6&&s.L>.01);const tol=.05;const par=S2.map((_,i)=>i);const f=i=>par[i]===i?i:(par[i]=f(par[i]));
+  const G=new Grid(.3);S2.forEach((s,k)=>{for(const p of [s.a,s.b])G.addBox(p[0]-tol,p[1]-tol,p[0]+tol,p[1]+tol,k)});
+  S2.forEach((s,k)=>{for(const p of [s.a,s.b])for(const j of G.query(p[0]-tol,p[1]-tol,p[0]+tol,p[1]+tol)){if(j===k)continue;const q=S2[j];if(D(p,q.a)<tol||D(p,q.b)<tol)par[f(k)]=f(j)}});
+  const comps=new Map();S2.forEach((s,k)=>{const r=f(k);let c=comps.get(r);if(!c){c={ids:[],tot:0,pts:[]};comps.set(r,c)}c.ids.push(s.i);c.tot+=s.L;c.pts.push(s.a,s.b)});
+  let mh=[];for(const c of comps.values()){if(c.ids.length<3)continue;const b=bboxOf(c.pts);const w=b.x1-b.x0,h=b.y1-b.y0,mx=Math.max(w,h);if(mx<.3||mx>2.6||Math.min(w,h)<mx*.55)continue;if(c.tot<2.4*mx)continue;
+    mh.push({x:(b.x0+b.x1)/2,y:(b.y0+b.y1)/2,w,h,round:c.ids.length>10,ids:c.ids})}
+  /* square + inner circle = one manhole */
+  const out=[];for(const m of mh.sort((a,b)=>Math.max(b.w,b.h)-Math.max(a.w,a.h))){const o=out.find(q=>D([q.x,q.y],[m.x,m.y])<Math.max(q.w,q.h)*.6);if(o){o.ids.push(...m.ids);o.inner=true}else out.push({...m})}
+  return out}
+function cleanNetwork(segs,opt={}){const eps=opt.eps||.12;
+  /* 1) manhole symbols drawn with the pipe lines */
+  const mh=opt.noManholes?[]:findManholes(segs);const drop=new Set(mh.flatMap(m=>m.ids));
+  const rest=segs.filter((_,i)=>!drop.has(i));
+  /* 2) chains, joined across dashes and small gaps, straightened */
+  const raw=rest.map(s=>[s.a[0],s.a[1],s.b[0],s.b[1]]);
+  let runs=chainSegs(raw,.06).map(r=>simplifyRun(r));runs=bridgeRuns2(runs,opt.gap||1.6,.94);runs=runs.map(r=>dpSimplify(r,eps));runs=dedupeParallel(runs,.18);runs=runs.filter(r=>polyLen(r)>=.35);
+  /* 3) pipes end at the manhole centre; a pipe that runs through a manhole is split there */
+  for(const m of mh){const R=Math.max(.6,Math.max(m.w,m.h)*.8);const out=[];for(const r of runs){let cut=-1;for(let i=1;i<r.length-1;i++)if(D(r[i],[m.x,m.y])<R){cut=i;break}
+      if(cut<0){for(let i=1;i<r.length&&cut<0;i++){const q=projSeg([m.x,m.y],r[i-1],r[i]);if(Math.hypot(q[0]-m.x,q[1]-m.y)<R*.6&&q[2]>.05&&q[2]<.95){r.splice(i,0,[m.x,m.y]);cut=i}}}
+      if(cut>0&&cut<r.length-1){out.push(r.slice(0,cut+1),r.slice(cut))}else out.push(r)}
+    runs=out.map(r=>{const p=r.slice();for(const k of [0,p.length-1])if(D(p[k],[m.x,m.y])<R)p[k]=[m.x,m.y];return p}).filter(r=>polyLen(r)>=.2)}
+  /* 4) a loose end close to another pipe joins it (T) */
+  for(const r of runs)for(const k of [0,r.length-1]){const E=r[k];if(mh.some(m=>D(E,[m.x,m.y])<1e-6))continue;let best=null,bd=.45;for(const q of runs){if(q===r)continue;for(let i=1;i<q.length;i++){const pr=projSeg(E,q[i-1],q[i]);const d=Math.hypot(E[0]-pr[0],E[1]-pr[1]);if(d<bd&&d>1e-6){bd=d;best=pr}}}if(best)r[k]=[best[0],best[1]]}
+  /* 5) type of each run = the type most of its length came from */
+  const TG=new Grid(2);segs.forEach((s,i)=>{if(drop.has(i))return;TG.addBox(Math.min(s.a[0],s.b[0])-.3,Math.min(s.a[1],s.b[1])-.3,Math.max(s.a[0],s.b[0])+.3,Math.max(s.a[1],s.b[1])+.3,i)});
+  const res=runs.map(r=>{const w={};for(let i=1;i<r.length;i++){const m=[(r[i-1][0]+r[i][0])/2,(r[i-1][1]+r[i][1])/2];let best=null,bd=.5;for(const j of TG.query(m[0],m[1],m[0],m[1])){const s=segs[j];const d=distSeg(m,s.a,s.b);if(d<bd){bd=d;best=s}}if(best&&best.typeId)w[best.typeId]=(w[best.typeId]||0)+D(r[i-1],r[i])}
+    const t=Object.entries(w).sort((a,b)=>b[1]-a[1])[0];return {pts:r,typeId:t?t[0]:null}});
+  return {runs:res,manholes:mh}}
+/* bridging with a looser angle (hand-drawn or slightly bent dashes) */
+function bridgeRuns2(runs,gap,cosT){let changed=true,guard=0;while(changed&&guard++<8){changed=false;const G=new Grid(Math.max(gap,1e-6));const ends=[];runs.forEach((r,ri)=>{if(!r||r.length<2)return;for(const at of [0,1]){const p=at?r[r.length-1]:r[0];let q=at?r[r.length-2]:r[1];/* direction from a longer stretch when the last piece is tiny */if(D(p,q)<.25&&r.length>2)q=at?r[r.length-3]:r[2];const dir=[p[0]-q[0],p[1]-q[1]];const L=Math.hypot(...dir)||1;ends.push({ri,at,p,dir:[dir[0]/L,dir[1]/L],len:polyLen(r)});G.addBox(p[0]-gap,p[1]-gap,p[0]+gap,p[1]+gap,ends.length-1)}});
+    const done=new Set();for(let i=0;i<ends.length;i++){const A=ends[i];if(done.has(A.ri)||!runs[A.ri])continue;let best=null,bs=1e9;for(const j of G.query(A.p[0],A.p[1],A.p[0],A.p[1])){const B=ends[j];if(B.ri===A.ri||done.has(B.ri)||!runs[B.ri])continue;const dd=D(A.p,B.p);if(dd>gap)continue;
+        const facing=-(A.dir[0]*B.dir[0]+A.dir[1]*B.dir[1]);if(facing<cosT)continue;const g=[B.p[0]-A.p[0],B.p[1]-A.p[1]];const gl=Math.hypot(...g);if(gl>.02&&(g[0]*A.dir[0]+g[1]*A.dir[1])/gl<cosT)continue;const sc=dd*(2-facing);if(sc<bs){bs=sc;best=B}}
+      if(best){const ra=runs[A.ri],rb=runs[best.ri];const a2=A.at?ra:ra.slice().reverse(),b2=best.at?rb.slice().reverse():rb;runs[A.ri]=simplifyRun([...a2,...b2]);runs[best.ri]=null;done.add(A.ri);done.add(best.ri);changed=true}}
+    runs=runs.filter(Boolean)}return runs}
+/* after drawing from marker strokes: rebuild the new pipes as a clean network, and add manholes found in the lines */
+function cleanAutoPipes(newIds){const d=S.drawing;const ids=new Set(newIds);const old=d.objects.filter(o=>ids.has(o.id)&&o.t==='pipe');if(!old.length)return {pipes:0,manholes:0};
+  const segs=[];for(const o of old)for(let i=1;i<o.pts.length;i++)segs.push({a:o.pts[i-1],b:o.pts[i],typeId:o.typeId,src:o.src});
+  const {runs,manholes}=cleanNetwork(segs);const keepItems=d.objects.filter(o=>o.t==='item');
+  const pipes=runs.map(r=>({id:uid(),t:'pipe',pts:r.pts,typeId:r.typeId,auto:true,ok:!!r.typeId,undef:!r.typeId}));
+  const mhItems=[];for(const m of manholes){if(keepItems.some(q=>D([q.x,q.y],[m.x,m.y])<.5))continue;const it=manholeFor('',null);if(it)mhItems.push({id:uid(),t:'item',itemId:it.id,x:m.x,y:m.y,auto:true,ok:true,src:'סמל שוחה בתוכנית'})}
+  d.objects=[...d.objects.filter(o=>!ids.has(o.id)||o.t!=='pipe'),...pipes,...mhItems];return {pipes:pipes.length,manholes:mhItems.length}}
 
 /* =========================================================
    submission sheet (clean engineering page), PDF / DXF / Excel
@@ -3407,10 +3481,12 @@ const VIC={ruler:'<path d="M3 17 17 3l4 4L7 21z"/><path d="m7 13 2 2M10 10l2 2M1
  ext:'<path d="M3 21 21 3" stroke-dasharray="2.5 2.5"/><path d="M8 16 16 8" stroke-width="2.6"/>',count:'<circle cx="12" cy="12" r="8"/><path d="M10.5 9.5 12 8v8"/>',note:'<path d="M4 4h16v12H9l-5 4z"/>',scale:'<path d="M3 8h18v8H3z"/><path d="M7 8v3M11 8v4M15 8v3M19 8v4"/>',
  pages:'<rect x="6" y="3" width="13" height="16" rx="1.5"/><path d="M4 7v13a1 1 0 0 0 1 1h10"/>',ortho:'<path d="M5 19V5M5 19h14"/><path d="M5 9h4v10" opacity=".45"/>',draw:'<path d="M3 17c3-5 5 1 8-3s4-6 7-3"/><path d="M4 21h16" opacity=".4"/>'};
 const vic=n=>VIC[n]?`<svg class="i" viewBox="0 0 24 24">${VIC[n]}</svg>`:ic(n);
-const VCOL=['#E5484D','#F97316','#F59E0B','#EAB308','#84CC16','#16A34A','#14B8A6','#06B6D4','#2563EB','#4F46E5','#9333EA','#DB2777','#78350F','#64748B','#0B1F33','#FFFFFF'];
-const VHL=['#FDE047','#FDBA74','#FCA5A5','#F9A8D4','#D8B4FE','#93C5FD','#67E8F9','#86EFAC'];
+/* FALILO marker colours – recognised automatically by the drawing system (★) */
+const FAL_PIPE='#FF2EC4',FAL_ITEM='#7A2EFF';
+const VCOL=[FAL_PIPE,FAL_ITEM,'#E5484D','#F97316','#F59E0B','#EAB308','#84CC16','#16A34A','#14B8A6','#06B6D4','#2563EB','#4F46E5','#9333EA','#DB2777','#78350F','#64748B','#0B1F33','#FFFFFF'];
+const VHL=[FAL_PIPE,FAL_ITEM,'#FDE047','#FDBA74','#FCA5A5','#F9A8D4','#D8B4FE','#93C5FD','#67E8F9','#86EFAC'];
 const VST=Object.assign({wpx:2.2,hlpx:16,fpx:13,mw:1.6,mf:12.5,snap:true},LS.get('falilo-vstyle',{}));const vStyleSave=()=>LS.set('falilo-vstyle',VST);
-const VW={meta:null,file:null,kind:null,pages:[],pi:0,view:{k:1,tx:0,ty:0},ann:null,tool:'pan',color:VCOL[0],hlc:VHL[0],wi:1,ortho:false,undo:[],redo:[],sel:null,tmp:null,
+const VW={meta:null,file:null,kind:null,pages:[],pi:0,view:{k:1,tx:0,ty:0},ann:null,tool:'pan',color:'#E5484D',hlc:VHL[0],wi:1,ortho:false,undo:[],redo:[],sel:null,tmp:null,
   pdf:null,page:null,vp:null,base:{},detail:null,dTask:null,dTimer:null,segs:{},cad:null,img:null,office:null,ocg:null,dpr:1,raf:0,snap:null,ptr:new Map(),saveState:'ok',gest:null,hid:new Set()};
 const vEl=s=>document.querySelector(s);
 
@@ -3946,7 +4022,7 @@ function vScaleMenu(auto){const pdf=VW.kind==='pdf';const cad=!!VW.cad;
     if(e.target.closest('[data-vsn]')){const n=+$('#vsN',m).value;if(n>0){vSetRatio(n);closeModal(m)}}const u=e.target.closest('[data-vunit]');if(u){vMut(()=>{VW.ann.scale[0]=+u.dataset.vunit});vRenderUI();closeModal(m)}}}
 
 /* ---------- properties card: colours (any colour) and free sizes ---------- */
-function vSwatches(cur,hl){const cols=hl?VHL:VCOL;return `<div class="row vsw">${cols.map(c=>`<button class="sw ${String(cur).toLowerCase()===c.toLowerCase()?'on':''}" data-vc="${c}" style="background:${c}" aria-label="צבע"></button>`).join('')}<label class="sw swc ${cols.some(c=>c.toLowerCase()===String(cur).toLowerCase())?'':'on'}" title="כל צבע" style="background:${cols.includes(cur)?'conic-gradient(red,yellow,lime,cyan,blue,magenta,red)':cur}"><input type="color" id="vcolor" value="${/^#[0-9a-f]{6}$/i.test(cur)?cur:'#E5484D'}"></label></div>`}
+function vSwatches(cur,hl){const cols=hl?VHL:VCOL;return `<div class="row vsw">${cols.map(c=>{const fav=c===FAL_PIPE||c===FAL_ITEM;return `<button class="sw ${fav?'fav':''} ${String(cur).toLowerCase()===c.toLowerCase()?'on':''}" data-vc="${c}" style="background:${c}" aria-label="צבע" title="${c===FAL_PIPE?'★ צבע FALILO לצנרת – מזוהה אוטומטית בשרטוט':c===FAL_ITEM?'★ צבע FALILO לשוחות ואביזרים – מזוהה אוטומטית':c}"></button>`}).join('')}<label class="sw swc ${cols.some(c=>c.toLowerCase()===String(cur).toLowerCase())?'':'on'}" title="כל צבע" style="background:${cols.includes(cur)?'conic-gradient(red,yellow,lime,cyan,blue,magenta,red)':cur}"><input type="color" id="vcolor" value="${/^#[0-9a-f]{6}$/i.test(cur)?cur:'#E5484D'}"></label></div>`}
 function vSlider(id,label,val,min,max,step,unit){return `<label class="vsl"><span>${label}</span><input type="range" id="${id}" min="${min}" max="${max}" step="${step}" value="${val}"><b id="${id}v">${(+val).toFixed(step<1?1:0)}${unit||''}</b></label>`}
 function vProps(){const el=vEl('#vprops');if(!el)return;const a=VW.sel&&vFind(VW.sel);const t=VW.tmp;const k=VW.view.k;
   if(t&&['poly','area','count','angle'].includes(t.t)&&t.pts.length){el.innerHTML=`<div class="card vcard2"><b>${vMeasTxt(t)||'…'}</b><div class="row"><button class="btn sm pri" data-va="done">${ic('check')}סיום</button><button class="btn sm" data-va="undo">${ic('undo')}נקודה אחורה</button><button class="btn sm icon" data-va="cancel">${ic('close')}</button></div></div>`;el.classList.add('on');return}
@@ -4250,7 +4326,8 @@ async function uploadPlan(kind){
 const KIND_HE={line:'קווי מדידה',ink:'שרטוטי יד',poly:'קווים שבורים',polygon:'פוליגונים',rect:'מלבנים',circle:'עיגולים'};
 function marksModal(groups,isRegion){return new Promise(res=>{
   const cm=S.project.colorMap||{};
-  const pick=g=>{const k=Object.keys(cm).find(c=>colorDist(c,g.color)<38);if(k)return cm[k];const role=guessRole(g);let best=null,bd=130;for(const p of lib().pipes){const dd=colorDist(p.color,g.color);if(dd<bd){bd=dd;best=p}}return {role,typeId:(best||lib().pipes[0]||{}).id,byText:true}};
+  const pick=g=>{if(colorDist(g.color,FAL_PIPE)<45)return {role:'hl',byText:true};if(colorDist(g.color,FAL_ITEM)<45){const mh=lib().items.find(i=>!i.baseName&&i.sym==='manhole'&&/ניקוז/.test(i.name))||lib().items.find(i=>i.sym==='manhole');if(mh)return {role:'item',itemId:mh.id}}
+    const k=Object.keys(cm).find(c=>colorDist(c,g.color)<38);if(k)return cm[k];const role=guessRole(g);let best=null,bd=130;for(const p of lib().pipes){const dd=colorDist(p.color,g.color);if(dd<bd){bd=dd;best=p}}return {role,typeId:(best||lib().pipes[0]||{}).id,byText:true}};
   const st=groups.map(g=>({g,ch:{...pick(g)}}));
   const opts=ch=>`${lib().pipes.map(p=>`<option value="pipe:${p.id}" ${ch.role==='pipe'&&ch.typeId===p.id?'selected':''}>צינור ${esc(p.name)}</option>`).join('')}<option value="newpipe">+ סוג צינור חדש…</option><optgroup label="סמל / אביזר">${lib().items.map(i=>`<option value="item:${i.id}" ${ch.role==='item'&&ch.itemId===i.id?'selected':''}>${esc(i.name)}</option>`).join('')}</optgroup><option value="skip" ${ch.role==='skip'?'selected':''}>לא לשרטט</option>`;
   const optsHL=ch=>`<option value="hl" ${ch.role==='hl'?'selected':''}>מרקר בחירה – לקחת את הצנרת מהתוכנית</option>`;
